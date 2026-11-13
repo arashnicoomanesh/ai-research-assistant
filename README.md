@@ -47,59 +47,7 @@ database, the system provides:
 
 ## Architecture
 
-```
-Query
-  │
-  ▼
-┌─────────────────────┐
-│  Adaptive Router    │──► No Retrieval (simple questions)
-└─────────────────────┘
-  │
-  ▼
-┌─────────────────────┐
-│  Query Rewriter     │──► Reformulates query for better retrieval
-└─────────────────────┘
-  │
-  ▼
-├──┬───────────────────────┬───────────────────────┐
-│  │                       │                       │
-│  ▼                       ▼                       ▼
-│ │                       │                       │
-│ ▼                       │                       │
-│┌─────────────────────┐ │ │ ┌─────────────────────┐
-││  No Retrieval       │ │ ││  Multi-Step         │
-││  (model knowledge)  │ │ ││  Decomposition      │
-│└─────────────────────┘ │ │ └─────────────────────┘
-│                        │               │
-│                        ▼               │
-│               ┌─────────────────────┐ │
-│               │  Corrective RAG       │ │
-│               │  (CRAG iterative)     │ │
-│               └─────────────────────┘ │
-│                        │              │
-│                        ▼              │
-│               ┌─────────────────────┐ │
-│               │  RAPTOR-enhanced      │ │
-│               │  (hierarchical)       │ │
-│               └─────────────────────┘ │
-│                                                      │
-│                 ▼                                      │
-│        ┌─────────────────────┐                    │
-│        │  Hybrid Retriever   │◄─────────────────┘
-│        │  Dense + BM25       │
-│        └─────────────────────┘
-│                  │
-                  ▼
-   ┌───────────────────────┐
-   │  Document Grader      │──► Relevant / Not Relevant
-   └───────────────────────┘
-│                  │
-▼                  │
-│         ┌─────────────────────┐
-│         │  Answer Generator   │──► Cited response
-│         └─────────────────────┘
-┘
-```
+![Architecture Overview](docs/architecture.webp)
 
 ---
 
