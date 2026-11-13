@@ -16,6 +16,7 @@
 
 - [Why This Project?](#-why-this-project)
 - [Features](#-features)
+- [Current Implementation Status](#-current-implementation-status)
 - [Architecture](#-architecture)
 - [Supported Query Strategies](#-supported-query-strategies)
 - [Quick Start](#-quick-start)
@@ -56,6 +57,60 @@ Whether you're learning RAG internals, researching AI papers, or building a priv
 | **⚡ Semantic cache** | Caches question→answer mappings for repeat queries (fast, no re-computation). |
 | **✅ Faithfulness self-check** | Validates that generated answers are supported by retrieved sources. |
 | **📈 Evaluation harness** | Runs structured evaluations with metrics (latency, faithfulness, citation rate). |
+
+---
+
+### 📊 Current Implementation Status
+
+> Honest snapshot of what works today, not a roadmap. Last verified: `2026-11-14`.
+
+### 📥 A. Data & Indexing
+
+| Capability | Status | Notes |
+|---|---|---|
+| PDF ingestion | ✓ Working | 6 papers ingested |
+| Structure-aware parsing | ✓ Partial | `pdfplumber` path works; Docling optional / fallback |
+| Parent-child chunking | ✓ Working | Child for search, parent for expansion |
+| Incremental indexing (hash + SQLite) | ✓ Working | Record manager tracks papers |
+| Qdrant vector index | ✓ Working | `ai_papers` collection live |
+| Embed children / abstract only | ✓ Working | CPU-safe indexing |
+| RAPTOR summary nodes | ⚠️ Code exists, not usable yet | Build failed; retrieval shows `summaries=0` |
+
+### 🔍 B. Core Query Pipeline
+
+| Capability | Status | Notes |
+|---|---|---|
+| CLI question interface | ✓ Working | positional + `--question` + interactive |
+| Semantic cache | ✓ Working | exact repeat = cache HIT |
+| Query rewriting | ✓ Working | sometimes over-generalizes entities |
+| Adaptive routing | ✓ Working | `no_retrieval` / `single_shot` / `multi_step` / `crag_raptor` |
+| Dense retrieval (`query_points`) | ✓ Working | modern Qdrant API |
+| Parent expansion | ✓ Working | lookup by payload `chunk_id` |
+| Answer generation + citations | ✓ Working | grounded answers returned |
+| CPU-Safe Mode | ✓ Working | default ON for target hardware |
+
+### 🧩 C. Advanced RAG Modules
+
+| Module | Status | Evidence |
+|---|---|---|
+| Adaptive RAG | ✓ Implemented | Router chooses strategy by query type |
+| Corrective RAG (CRAG) | ✓ Implemented (lightweight in CPU mode) | rewrite / merge path used successfully |
+| Multi-Step Retrieval | ✓ Implemented | decomposition + per-sub retrieval code path |
+| RAPTOR | ⚠️ Partial | retriever path exists; no built summaries |
+| Semantic Caching | ✓ Implemented | HIT path verified |
+| Self-check / faithfulness | ⚠️ Implemented but OFF by default | disabled in CPU-Safe Mode |
+| LLM document grading | ⚠️ Implemented but OFF by default | falls back to vector score ranking |
+
+### 🛠️ D. Engineering / Ops
+
+| Capability | Status | Notes |
+|---|---|---|
+| Environment checker | ✓ | — |
+| Ingest / stats CLI | ✓ | stats vector count display still buggy |
+| Eval harness | ✓ | code present |
+| README / packaging | ✓ | — |
+| GitHub repo + CI | ✓ | passing |
+| Architecture diagram in `docs/` | ✓ | added |
 
 ---
 
