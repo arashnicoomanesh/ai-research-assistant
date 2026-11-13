@@ -1,0 +1,15 @@
+# Core dependencies
+qdrant-client==1.10.0          # Vector database client
+ollama==0.4.2                  # Ollama Python client for LLM/embeddings
+pypdf==4.3.1                   # PDF parsing (fallback)
+python-dotenv==1.0.1           # Environment variable loading
+numpy==1.26.4                  # Numerical computing
+tqdm==4.66.4                   # Progress bars
+rank-bm25==0.2.2               # BM25 keyword search
+xxhash==3.4.1                  # Fast hashing for cache/lookup
+
+# PDF parsing - docling for structure extraction (CPU-friendly)
+docling==2.15.1                # Structure-aware PDF parsing (tables, sections)
+
+# Fallback PDF parsing
+pdfplumber==0.11.4             # Alternative PDF parser for edge cases

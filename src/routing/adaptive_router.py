@@ -1,0 +1,240 @@
+"""
+Adaptive Router for AI Research Papers.
+
+Classifies queries and routes them to appropriate retrieval strategies.
+Strategies:
+- "no_retrieval": Simple questions answerable from model knowledge
+- "single_shot": Standard retrieval + generation
+- "multi_step": Complex queries requiring multiple retrieval steps
+"""
+import json
+import logging
+import re
+from typing import Optional, Literal
+from dataclasses import dataclass
+from src.core.llm import OllamaLLM, get_llm
+
+logger = logging.getLogger(__name__)
+
+
+Strategy = Literal["no_retrieval", "single_shot", "multi_step", "crag_raptor"]
+
+
+@dataclass
+class RoutingDecision:
+    """Result of query routing."""
+    strategy: Strategy
+    confidence: float
+    reasoning: str
+    query_type: str
+    use_raptor: bool = False  # Whether RAPTOR-enhanced retrieval should be used
+
+
+class AdaptiveRouter:
+    """
+    Routes queries to appropriate retrieval strategies.
+
+    Uses LLM classification with fallback heuristics.
+    Supports three strategies for different query complexities.
+    """
+
+    # System prompt for classification
+    ROUTER_SYSTEM_PROMPT = """You are a query router for a research paper QA system.
+Classify the user's query into one of these strategies:
+
+1. "no_retrieval" - Query can be answered from general knowledge without paper retrieval.
+   Examples: "What is a neural network?", "Define overfitting", "Explain backpropagation",
+             "What does RAG stand for?"
+
+2. "single_shot" - Query requires retrieving specific information from papers, answerable in one retrieval step.
+   Examples: "What method did the Attention Is All You Need paper use?",
+             "What are the results of the BERT paper?",
+             "Summarize the contributions of the GPT-3 paper."
+
+3. "crag_raptor" - Query benefits from hierarchical summary retrieval using RAPTOR.
+    Provides high-level overview of field/trends, then detailed evidence.
+    Examples: "Overview of transformer architectures in recent papers",
+              "Trends in attention mechanisms across 2020-2023",
+              "Summarize the field of diffusion models",
+              "Evolution of RAG techniques in recent years"
+
+Output MUST be valid JSON:
+{
+  "strategy": "no_retrieval|single_shot|multi_step|crag_raptor",
+  "confidence": 0.0-1.0,
+  "reasoning": "Brief explanation",
+  "query_type": "factual|comparison|specific_paper|methodology|survey|general",
+  "use_raptor": true|false
+}"""
+
+    USER_PROMPT_TEMPLATE = """Query: {query}
+
+Classify this query and return the JSON structure."""
+
+    # Heuristic patterns for fallback classification
+    NO_RETRIEVAL_PATTERNS = [
+        r"\b(what is|define|definition of|explain|describe)\b.*\b(neural network|transformer|attention|overfitting|backpropagation|gradient descent|loss function|activation function|regularization|dropout|batch norm|layer norm|embedding|tokenizer|fine-tuning|transfer learning|zero-shot|few-shot|in-context learning|RLHF|RAG|retrieval augmented|diffusion model|variational autoencoder|GAN|CNN|RNN|LSTM|BERT|GPT)\b",
+        r"\bhow does\b.*\b(work|function)\b",
+        r"\bwhat are\b.*\b(types of|kinds of|categories of)\b",
+        r"\bwhat does\b.*\b(stand for|mean)\b",
+    ]
+
+    SINGLE_SHOT_PATTERNS = [
+        r"\b(paper|study|research|article|publication)\b",
+        r"\b(author|authors|proposed|introduced|presented)\b",
+        r"\b(results?|findings?|conclusion|limitation|methodology|approach|method|architecture|model)\b",
+        r"\b(summarize|summary|overview)\b.*\b(paper|study|work)\b",
+        r"\b(arxiv|\d{4}\.\d{4,5})\b",
+        r"\bwhat (did|does|was)\b.*\b(paper|study|model|method)\b",
+    ]
+
+    MULTI_STEP_PATTERNS = [
+        r"\b(compare|comparison|versus|vs\.?|difference between|contrast)\b",
+        r"\b(common|shared|across|multiple|various|different)\b.*\b(papers?|studies?|models?|approaches?)\b",
+        r"\b(survey|review|evolution|trend|history|timeline|progression)\b",
+        r"\b(how do|what are)\b.*\b(different|various|multiple)\b",
+        r"\b(common limitations|shared challenges|across papers|in the literature)\b",
+    ]
+
+    RAPTOR_PATTERNS = [
+        r"\b(overview|trends?|evolution|timeline)\b.*\b(field|area|domain|paradigm)\b",
+        r"\b(summarize|survey)\b.*\b(field|area|domain)\b",
+        r"\b(key|main|important|significant) .* (developments?|advancements?|trends?)\b",
+        r"\b(recent .* year|past .* year)\b.*\b(advancements?|progress|trends)\b",
+    ]
+
+    def __init__(
+        self,
+        llm: Optional[OllamaLLM] = None,
+        use_llm: bool = True,
+    ):
+        """
+        Initialize adaptive router.
+
+        Args:
+            llm: LLM client (creates default if None)
+            use_llm: Whether to use LLM for classification (fallback to heuristics if False)
+        """
+        self.llm = llm or get_llm()
+        self.use_llm = use_llm
+
+    def route(self, query: str) -> RoutingDecision:
+        """
+        Route a query to the appropriate strategy.
+
+        Args:
+            query: User query
+
+        Returns:
+            RoutingDecision with strategy and metadata
+        """
+        if self.use_llm:
+            try:
+                return self._route_llm(query)
+            except Exception as e:
+                logger.warning(f"LLM routing failed, using heuristics: {e}")
+                return self._route_heuristic(query)
+        else:
+            return self._route_heuristic(query)
+
+    def _route_llm(self, query: str) -> RoutingDecision:
+        """Route using LLM classification."""
+        prompt = self.USER_PROMPT_TEMPLATE.format(query=query)
+
+        response = self.llm.generate(
+            prompt=prompt,
+            system_prompt=self.ROUTER_SYSTEM_PROMPT,
+            temperature=0.0,
+            max_tokens=512,
+        )
+
+        # Parse JSON response
+        json_start = response.find("{")
+        json_end = response.rfind("}") + 1
+        if json_start >= 0 and json_end > json_start:
+            json_str = response[json_start:json_end]
+            data = json.loads(json_str)
+
+            strategy = data.get("strategy", "single_shot")
+            if strategy not in ("no_retrieval", "single_shot", "multi_step", "crag_raptor"):
+                strategy = "single_shot"
+
+            return RoutingDecision(
+                strategy=strategy,
+                confidence=float(data.get("confidence", 0.8)),
+                reasoning=data.get("reasoning", "LLM classification"),
+                query_type=data.get("query_type", "unknown"),
+                use_raptor=data.get("use_raptor", False),
+            )
+
+        # Fallback if parsing fails
+        return self._route_heuristic(query)
+
+    def _route_heuristic(self, query: str) -> RoutingDecision:
+        """Route using heuristic pattern matching."""
+        query_lower = query.lower()
+
+        # Check for RAPTOR/survey indicators first
+        for pattern in self.RAPTOR_PATTERNS:
+            if re.search(pattern, query_lower):
+                return RoutingDecision(
+                    strategy="crag_raptor",
+                    confidence=0.75,
+                    reasoning=f"Heuristic matched RAPTOR: {pattern}",
+                    query_type="survey",
+                    use_raptor=True,
+                )
+
+        # Check for multi_step indicators (complex comparative/survey queries)
+        for pattern in self.MULTI_STEP_PATTERNS:
+            if re.search(pattern, query_lower):
+                return RoutingDecision(
+                    strategy="multi_step",
+                    confidence=0.75,
+                    reasoning=f"Heuristic matched multi_step: {pattern}",
+                    query_type="comparison" if "compare" in pattern or "versus" in pattern else "survey",
+                    use_raptor=False,
+                )
+
+        # Check for single_shot indicators (specific paper queries)
+        for pattern in self.SINGLE_SHOT_PATTERNS:
+            if re.search(pattern, query_lower):
+                return RoutingDecision(
+                    strategy="single_shot",
+                    confidence=0.75,
+                    reasoning=f"Heuristic matched single_shot: {pattern}",
+                    query_type="specific_paper",
+                    use_raptor=False,
+                )
+
+        # Check for no_retrieval indicators (general knowledge)
+        for pattern in self.NO_RETRIEVAL_PATTERNS:
+            if re.search(pattern, query_lower):
+                return RoutingDecision(
+                    strategy="no_retrieval",
+                    confidence=0.7,
+                    reasoning=f"Heuristic matched no_retrieval: {pattern}",
+                    query_type="general",
+                    use_raptor=False,
+                )
+
+        # Default to single_shot for ambiguous queries
+        return RoutingDecision(
+            strategy="single_shot",
+            confidence=0.5,
+            reasoning="Default strategy (no clear heuristic match)",
+            query_type="unknown",
+            use_raptor=False,
+        )
+
+    def route_batch(self, queries: list[str]) -> list[RoutingDecision]:
+        """Route multiple queries."""
+        return [self.route(q) for q in queries]
+
+
+def get_router(
+    llm: Optional[OllamaLLM] = None,
+    use_llm: bool = True,
+) -> AdaptiveRouter:
+    """Get a router instance."""
+    return AdaptiveRouter(llm, use_llm)

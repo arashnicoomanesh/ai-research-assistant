@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Local data / runtime
+data/papers/
+data/processed/
+data/cache/
+data/eval/reports/
+qdrant_storage/
+*.db
+*.sqlite
+
+# Logs / temp
+*.log
+/tmp/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# IDE
+.vscode/
+.idea/
