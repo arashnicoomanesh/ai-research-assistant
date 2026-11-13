@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/single.webp" alt="AI Research Assistant" width="200">
+</p>
+
 # 🧠 AI Research Assistant
 
 
