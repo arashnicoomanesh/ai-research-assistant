@@ -1,6 +1,6 @@
 # 🧠 AI Research Assistant
 
-> **A local, privacy-first RAG system for AI research papers — built from scratch without LangChain or LlamaIndex.**
+
 
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -9,6 +9,7 @@
 [![Local-First](https://img.shields.io/badge/Privacy-Local--First-success)](https://github.com/arashnicoomanesh/ai-research-assistant)
 [![No LangChain](https://img.shields.io/badge/No-LangChain%2FLlamaIndex-informational)](https://github.com/arashnicoomanesh/ai-research-assistant)
 
+> **A local, privacy-first RAG system for AI research papers — built from scratch without LangChain or LlamaIndex.**
 ---
 
 ## 📑 Table of Contents
