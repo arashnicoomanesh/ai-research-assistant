@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """
-AI Research Assistant - Main CLI Entry Point (Phase 3C: RAPTOR + CRAG).
+AI Research Assistant - Main CLI Entry Point (Phase 4: GraphRAG + RAPTOR + CRAG).
 
-Orchestrates the full pipeline with Corrective RAG and RAPTOR-enhanced retrieval:
+Orchestrates the full pipeline with GraphRAG, Corrective RAG, and RAPTOR-enhanced retrieval:
 1. Check Semantic Cache
 2. If miss -> Rewrite query
-3. Route the query (adaptive router with RAPTOR support)
+3. Route the query (adaptive router with GraphRAG + RAPTOR support)
 4. If retrieval needed:
    - no_retrieval: Answer from model knowledge
    - single_shot: Corrective RAG (CRAG)
    - multi_step: Decompose + retrieve per sub-question
    - crag_raptor: RAPTOR-enhanced hierarchical retrieval
+   - graph_rag: Knowledge graph retrieval for relational queries
 5. Answer generation + self-check
 6. Store in cache
 7. Print result cleanly
@@ -19,6 +20,7 @@ import argparse
 import logging
 import sys
 from pathlib import Path
+from typing import List, Dict, Any, Optional
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -33,6 +35,7 @@ from src.retrieval.semantic_cache import get_cache
 from src.retrieval.corrective_retriever import get_corrective_retriever, CorrectiveRetrievalResult
 from src.retrieval.multi_step_retriever import get_multi_step_retriever, MultiStepRetriever
 from src.retrieval.raptor_retriever import get_raptor_retriever, RaptorRetrievalResult
+from src.graph import get_graph_retriever, GraphEvidence
 from src.routing.adaptive_router import get_router, RoutingDecision
 from src.generation.answer_generator import get_generator, GeneratedAnswer
 
@@ -49,9 +52,10 @@ def _get_parser():
     """Create the CLI argument parser."""
     parser = argparse.ArgumentParser(
         usage="python src/main.py [options] [question]",
-        description="AI Research Assistant - Query your paper collection with CRAG + RAPTOR pipeline.\n\n"
+        description="AI Research Assistant - Query your paper collection with GraphRAG + CRAG + RAPTOR pipeline.\n\n"
                     "Supports adaptive routing, query rewriting, corrective RAG, multi-step retrieval,\n"
-                    "RAPTOR-enhanced summaries, semantic caching, and faithfulness self-checks.\n\n"
+                    "RAPTOR-enhanced summaries, knowledge graph retrieval, semantic caching,\n"
+                    "and faithfulness self-checks.\n\n"
                     "If no question is provided, interactive mode is started.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
@@ -61,6 +65,9 @@ Examples:
 
   python src/main.py "Compare transformer architectures in recent papers"
     Complex query: will use multi-step or RAPTOR strategy.
+
+  python src/main.py "How is Self-RAG related to CRAG?"
+    Relational query: will use GraphRAG strategy.
 
   python src/main.py --interactive
     Start interactive question loop.
@@ -76,6 +83,12 @@ Examples:
 
   python scripts/build_raptor.py --paper ai_papers --limit 5
     Build RAPTOR summaries for one paper, limited to 5 groups.
+
+  python scripts/build_graph.py --all
+    Build GraphRAG knowledge graph for all papers.
+
+  python scripts/build_graph.py --stats
+    Show graph statistics.
 
   scripts/check_environment.py
     Validate that Ollama, Qdrant, and data directories are properly configured.
@@ -145,6 +158,10 @@ class ResearchAssistant:
         self.raptor_retriever = get_raptor_retriever(
             embeddings=self.embeddings,
         )
+        self.graph_retriever = get_graph_retriever(
+            embeddings=self.embeddings,
+            retriever=self.retriever,
+        )
         self.generator = get_generator(
             max_context_chunks=config.cpu_safe.context_top_k,
             do_self_check=config.cpu_safe.enable_self_check,
@@ -176,6 +193,45 @@ class ResearchAssistant:
         # Cache stats
         stats = self.cache.stats()
         logger.info("Cache: %d entries, %d total hits", stats["entries"], stats["total_hits"])
+
+    def _graph_evidence_to_chunks(self, evidence: GraphEvidence) -> List[Dict[str, Any]]:
+        """
+        Convert GraphEvidence to chunk format for answer generator.
+
+        Args:
+            evidence: GraphEvidence from graph retriever
+
+        Returns:
+            List of chunk dicts compatible with generator
+        """
+        chunks = []
+
+        # Add graph context as a special chunk
+        if evidence.entities or evidence.relations:
+            graph_chunk = {
+                "chunk_id": "graph_context",
+                "paper_id": "graph",
+                "title": "Knowledge Graph Context",
+                "section": "Graph Evidence",
+                "chunk_type": "graph_context",
+                "text": evidence.to_context_string(),
+                "relevance_score": 1.0,
+                "metadata": {
+                    "entity_count": len(evidence.entities),
+                    "relation_count": len(evidence.relations),
+                },
+            }
+            chunks.append(graph_chunk)
+
+        # Add supporting vector chunks
+        for chunk in evidence.supporting_chunks:
+            # Ensure required fields
+            chunk_copy = dict(chunk)
+            chunk_copy.setdefault("chunk_type", "child")
+            chunk_copy.setdefault("relevance_score", chunk.get("score", 0.5))
+            chunks.append(chunk_copy)
+
+        return chunks
 
     def ask(self, query: str) -> GeneratedAnswer:
         """
@@ -380,6 +436,75 @@ class ResearchAssistant:
             self.cache.put(query, answer.answer, answer.sources, answer.strategy)
             return answer
 
+        elif routing.strategy == "graph_rag":
+            logger.info("GraphRAG retrieval engaged")
+            if not config.graph.enabled:
+                logger.warning("GraphRAG is disabled in config, falling back to single_shot")
+                # Fall through to single_shot
+            else:
+                graph_evidence = self.graph_retriever.retrieve(
+                    query=search_query,
+                )
+
+                # Log GraphRAG retrieval details
+                logger.info("GraphRAG retrieval: linked_entities=%d, relations=%d, supporting_chunks=%d",
+                           len(graph_evidence.entities),
+                           len(graph_evidence.relations),
+                           len(graph_evidence.supporting_chunks))
+
+                for entity in graph_evidence.entities[:3]:
+                    logger.info("  Linked entity: %s (%s)", entity.name, entity.type.value)
+
+                for rel in graph_evidence.relations[:3]:
+                    logger.info("  Relation: %s -[%s]-> %s",
+                               rel.source_id, rel.relation_type.value, rel.target_id)
+
+                # Fallback if graph evidence is empty
+                if not graph_evidence.entities and not graph_evidence.relations:
+                    logger.warning("GraphRAG returned empty evidence, falling back to single_shot")
+                else:
+                    # Convert GraphEvidence to chunks for generator
+                    final_chunks = self._graph_evidence_to_chunks(graph_evidence)
+
+                    if not final_chunks:
+                        answer = GeneratedAnswer(
+                            answer="No relevant information found using GraphRAG retrieval.",
+                            sources=[],
+                            query=query,
+                            strategy="graph_rag_no_results",
+                            faithful=True,
+                            confidence=0.0,
+                            self_check_reasoning="GraphRAG retrieval returned no results"
+                        )
+                        self.cache.put(query, answer.answer, answer.sources, answer.strategy)
+                        return answer
+
+                    # Generate answer with multi-step mode (mixed evidence)
+                    answer = self.generator.generate(
+                        query=query,
+                        graded_chunks=final_chunks,
+                        retriever=self.retriever,
+                        multi_step_mode=True,
+                    )
+
+                    # Add GraphRAG strategy label
+                    answer.strategy = f"graph_rag_{graph_evidence.metadata.get('query_type', 'relational')}"
+
+                    # Include GraphRAG metadata
+                    answer.multi_step_metadata = {
+                        "query_type": "relational",
+                        "linked_entities": graph_evidence.metadata.get("linked_entity_ids", []),
+                        "expanded_entity_count": graph_evidence.metadata.get("expanded_entity_count", 0),
+                        "relation_count": graph_evidence.metadata.get("relation_count", 0),
+                        "supporting_chunk_count": graph_evidence.metadata.get("supporting_chunk_count", 0),
+                        "hops": graph_evidence.metadata.get("hops", 1),
+                        "graph_context": graph_evidence.to_context_string(),
+                    }
+
+                    # Store in cache
+                    self.cache.put(query, answer.answer, answer.sources, answer.strategy)
+                    return answer
+
         # Fallback if no strategy matched
         answer = self.generator.generate_no_retrieval(query)
         self.cache.put(query, answer.answer, answer.sources, "no_retrieval_fallback")
@@ -388,8 +513,8 @@ class ResearchAssistant:
     def interactive(self) -> None:
         """Run interactive CLI loop."""
         print("\n" + "=" * 70)
-        print("AI Research Assistant - Interactive Mode (Phase 3C: RAPTOR + CRAG)")
-        print("Features: Semantic Cache | Query Rewriting | Adaptive Routing | CRAG | Multi-Step | RAPTOR | Self-Check")
+        print("AI Research Assistant - Interactive Mode (Phase 4: GraphRAG + RAPTOR + CRAG)")
+        print("Features: Semantic Cache | Query Rewriting | Adaptive Routing | CRAG | Multi-Step | RAPTOR | GraphRAG | Self-Check")
         print("Type 'exit', 'quit', or Ctrl+C to quit")
         print("=" * 70 + "\n")
 
@@ -427,16 +552,19 @@ class ResearchAssistant:
             "crag_strong_rewrite": "🔍💪",
             "raptor_survey": "🗺️",
             "raptor_detail": "🗺️📄",
+            "graph_rag_relational": "🕸️",
             "cached_no_retrieval": "⚡",
             "cached_retrieval_augmented": "⚡",
             "cached_single_shot": "⚡",
             "cached_multi_step_3sub_2retrievals": "⚡🧩",
             "cached_raptor_survey": "⚡🗺️",
             "cached_raptor_detail": "⚡🗺️📄",
+            "cached_graph_rag_relational": "⚡🕸️",
             "no_results": "❌",
             "no_relevant": "⚠️",
             "multi_step_no_results": "❌",
             "raptor_no_results": "❌",
+            "graph_rag_no_results": "❌",
             "error": "💥",
         }
         icon = strategy_icons.get(answer.strategy, "📝")

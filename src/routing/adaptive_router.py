@@ -6,6 +6,8 @@ Strategies:
 - "no_retrieval": Simple questions answerable from model knowledge
 - "single_shot": Standard retrieval + generation
 - "multi_step": Complex queries requiring multiple retrieval steps
+- "crag_raptor": RAPTOR-enhanced hierarchical retrieval for surveys
+- "graph_rag": Graph-based retrieval for relational/entity queries
 """
 import json
 import logging
@@ -17,7 +19,7 @@ from src.core.llm import OllamaLLM, get_llm
 logger = logging.getLogger(__name__)
 
 
-Strategy = Literal["no_retrieval", "single_shot", "multi_step", "crag_raptor"]
+Strategy = Literal["no_retrieval", "single_shot", "multi_step", "crag_raptor", "graph_rag"]
 
 
 @dataclass
@@ -28,6 +30,7 @@ class RoutingDecision:
     reasoning: str
     query_type: str
     use_raptor: bool = False  # Whether RAPTOR-enhanced retrieval should be used
+    use_graph: bool = False  # Whether GraphRAG should be used
 
 
 class AdaptiveRouter:
@@ -35,7 +38,7 @@ class AdaptiveRouter:
     Routes queries to appropriate retrieval strategies.
 
     Uses LLM classification with fallback heuristics.
-    Supports three strategies for different query complexities.
+    Supports five strategies for different query complexities.
     """
 
     # System prompt for classification
@@ -58,13 +61,22 @@ Classify the user's query into one of these strategies:
               "Summarize the field of diffusion models",
               "Evolution of RAG techniques in recent years"
 
+4. "graph_rag" - Query asks about relationships between entities, methods, or concepts.
+    Uses knowledge graph for entity linking and neighborhood traversal.
+    Examples: "How is Self-RAG related to CRAG?",
+              "What methods are based on BERT?",
+              "What techniques does Self-RAG introduce?",
+              "Which models improve upon Transformer?",
+              "What does X use?", "What addresses Y?"
+
 Output MUST be valid JSON:
 {
-  "strategy": "no_retrieval|single_shot|multi_step|crag_raptor",
+  "strategy": "no_retrieval|single_shot|multi_step|crag_raptor|graph_rag",
   "confidence": 0.0-1.0,
   "reasoning": "Brief explanation",
-  "query_type": "factual|comparison|specific_paper|methodology|survey|general",
-  "use_raptor": true|false
+  "query_type": "factual|comparison|specific_paper|methodology|survey|general|relational",
+  "use_raptor": true|false,
+  "use_graph": true|false
 }"""
 
     USER_PROMPT_TEMPLATE = """Query: {query}
@@ -101,6 +113,14 @@ Classify this query and return the JSON structure."""
         r"\b(summarize|survey)\b.*\b(field|area|domain)\b",
         r"\b(key|main|important|significant) .* (developments?|advancements?|trends?)\b",
         r"\b(recent .* year|past .* year)\b.*\b(advancements?|progress|trends)\b",
+    ]
+
+    GRAPH_RAG_PATTERNS = [
+        r"\b(how is|how does)\b.*\b(related to|connected to|linked to|compared to)\b",
+        r"\b(what|which)\b.*\b(methods?|techniques?|models?|approaches?)\b.*\b(based on|built on|improve|improves|introduce|introduces|uses?|addresses?)\b",
+        r"\b(what does|which)\b.*\b(introduce|use|address|improve)\b",
+        r"\b(lineage|ancestry|family tree|based on|influenced by|derived from)\b",
+        r"\b(relat|connect|link|associat)\b.*\b(to|with)\b",
     ]
 
     def __init__(
@@ -156,7 +176,7 @@ Classify this query and return the JSON structure."""
             data = json.loads(json_str)
 
             strategy = data.get("strategy", "single_shot")
-            if strategy not in ("no_retrieval", "single_shot", "multi_step", "crag_raptor"):
+            if strategy not in ("no_retrieval", "single_shot", "multi_step", "crag_raptor", "graph_rag"):
                 strategy = "single_shot"
 
             return RoutingDecision(
@@ -165,6 +185,7 @@ Classify this query and return the JSON structure."""
                 reasoning=data.get("reasoning", "LLM classification"),
                 query_type=data.get("query_type", "unknown"),
                 use_raptor=data.get("use_raptor", False),
+                use_graph=data.get("use_graph", False),
             )
 
         # Fallback if parsing fails
@@ -174,7 +195,19 @@ Classify this query and return the JSON structure."""
         """Route using heuristic pattern matching."""
         query_lower = query.lower()
 
-        # Check for RAPTOR/survey indicators first
+        # Check for GRAPH_RAG indicators first (relational queries)
+        for pattern in self.GRAPH_RAG_PATTERNS:
+            if re.search(pattern, query_lower):
+                return RoutingDecision(
+                    strategy="graph_rag",
+                    confidence=0.75,
+                    reasoning=f"Heuristic matched graph_rag: {pattern}",
+                    query_type="relational",
+                    use_raptor=False,
+                    use_graph=True,
+                )
+
+        # Check for RAPTOR/survey indicators
         for pattern in self.RAPTOR_PATTERNS:
             if re.search(pattern, query_lower):
                 return RoutingDecision(
@@ -183,6 +216,7 @@ Classify this query and return the JSON structure."""
                     reasoning=f"Heuristic matched RAPTOR: {pattern}",
                     query_type="survey",
                     use_raptor=True,
+                    use_graph=False,
                 )
 
         # Check for multi_step indicators (complex comparative/survey queries)
@@ -194,6 +228,7 @@ Classify this query and return the JSON structure."""
                     reasoning=f"Heuristic matched multi_step: {pattern}",
                     query_type="comparison" if "compare" in pattern or "versus" in pattern else "survey",
                     use_raptor=False,
+                    use_graph=False,
                 )
 
         # Check for single_shot indicators (specific paper queries)
@@ -205,6 +240,7 @@ Classify this query and return the JSON structure."""
                     reasoning=f"Heuristic matched single_shot: {pattern}",
                     query_type="specific_paper",
                     use_raptor=False,
+                    use_graph=False,
                 )
 
         # Check for no_retrieval indicators (general knowledge)
@@ -216,6 +252,7 @@ Classify this query and return the JSON structure."""
                     reasoning=f"Heuristic matched no_retrieval: {pattern}",
                     query_type="general",
                     use_raptor=False,
+                    use_graph=False,
                 )
 
         # Default to single_shot for ambiguous queries
@@ -225,6 +262,7 @@ Classify this query and return the JSON structure."""
             reasoning="Default strategy (no clear heuristic match)",
             query_type="unknown",
             use_raptor=False,
+            use_graph=False,
         )
 
     def route_batch(self, queries: list[str]) -> list[RoutingDecision]:

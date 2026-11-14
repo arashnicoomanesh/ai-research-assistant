@@ -1,0 +1,160 @@
+{
+  "nodes": [
+    {
+      "id": "retrieval-augmented-language-models",
+      "name": "Retrieval-augmented language models",
+      "type": "Method",
+      "aliases": [
+        "Retrieval-Augmented Language Models"
+      ],
+      "paper_ids": [
+        "RAG_RAPTOR"
+      ]
+    },
+    {
+      "id": "long-tail-knowledge",
+      "name": "long-tail knowledge",
+      "type": "Other",
+      "aliases": [],
+      "paper_ids": [
+        "RAG_RAPTOR"
+      ]
+    },
+    {
+      "id": "raptor",
+      "name": "RAPTOR",
+      "type": "Method",
+      "aliases": [
+        "RAPTOR Model"
+      ],
+      "paper_ids": [
+        "RAG_RAPTOR"
+      ]
+    },
+    {
+      "id": "recursive-embedding-clustering-summarizing-chunks-of-text"
+    },
+    {
+      "id": "self-rag",
+      "name": "Self-RAG",
+      "type": "Method",
+      "aliases": [
+        "Self RAG"
+      ],
+      "paper_ids": [
+        "CRAG"
+      ]
+    },
+    {
+      "id": "reflection-tokens",
+      "name": "reflection tokens",
+      "type": "Technique",
+      "aliases": [],
+      "paper_ids": [
+        "CRAG"
+      ]
+    },
+    {
+      "id": "self-reflectiveretrieval-augmentedgeneration",
+      "name": "Self-ReflectiveRetrieval-AugmentedGeneration",
+      "type": "Method",
+      "aliases": [
+        "SELF-RAG"
+      ],
+      "paper_ids": [
+        "self_RAG"
+      ]
+    },
+    {
+      "id": "reflectiontokens",
+      "name": "reflectiontokens",
+      "type": "Technique",
+      "aliases": [],
+      "paper_ids": [
+        "self_RAG"
+      ]
+    },
+    {
+      "id": "transformer",
+      "name": "Transformer",
+      "type": "Method",
+      "aliases": [
+        "Transformer model"
+      ],
+      "paper_ids": [
+        "attention"
+      ]
+    },
+    {
+      "id": "attention-mechanisms",
+      "name": "attention mechanisms",
+      "type": "Technique",
+      "aliases": [],
+      "paper_ids": [
+        "attention"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "source": "retrieval-augmented-language-models",
+      "target": "long-tail-knowledge",
+      "key": "retrieval-augmented-language-models_introduces_long-tail-knowledge",
+      "relation_type": "introduces",
+      "evidence": "Retrieval-augmented language models incorporate long-tail knowledge",
+      "chunk_ids": [
+        "RAG_RAPTOR_abstract"
+      ],
+      "paper_id": "RAG_RAPTOR",
+      "weight": 1.0
+    },
+    {
+      "source": "raptor",
+      "target": "recursive-embedding-clustering-summarizing-chunks-of-text",
+      "key": "raptor_introduces_recursive-embedding-clustering-summarizing-chunks-of-text",
+      "relation_type": "introduces",
+      "evidence": "RAPTOR introduces recursively embedding, clustering, and summarizing chunks of text",
+      "chunk_ids": [
+        "RAG_RAPTOR_abstract"
+      ],
+      "paper_id": "RAG_RAPTOR",
+      "weight": 1.0
+    },
+    {
+      "source": "self-rag",
+      "target": "reflection-tokens",
+      "key": "self-rag_introduces_reflection-tokens",
+      "relation_type": "introduces",
+      "evidence": "Self-RAG introduces reflection tokens for self-correction",
+      "chunk_ids": [
+        "CRAG_abstract"
+      ],
+      "paper_id": "CRAG",
+      "weight": 1.0
+    },
+    {
+      "source": "self-reflectiveretrieval-augmentedgeneration",
+      "target": "reflectiontokens",
+      "key": "self-reflectiveretrieval-augmentedgeneration_introduces_reflectiontokens",
+      "relation_type": "introduces",
+      "evidence": "Our framework trains a single arbitrary LM that adaptively retrieves passages on-demand, and generates and reflects on retrieved passages and its own generations using special tokens, called reflection tokens.",
+      "chunk_ids": [
+        "self_RAG_abstract"
+      ],
+      "paper_id": "self_RAG",
+      "weight": 1.0
+    },
+    {
+      "source": "transformer",
+      "target": "attention-mechanisms",
+      "key": "transformer_introduces_attention-mechanisms",
+      "relation_type": "introduces",
+      "evidence": "On the WMT 2014 English-to-French translation task, our model establishes a new single-model state-of-the-art BLEU score of 41.8 after training for 3.5 days on eight GPUs, a small fraction of the training costs of the best models from the lit",
+      "chunk_ids": [
+        "attention_abstract"
+      ],
+      "paper_id": "attention",
+      "weight": 1.0
+    }
+  ]
+}

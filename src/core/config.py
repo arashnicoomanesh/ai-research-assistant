@@ -88,6 +88,18 @@ class PathsConfig:
 
 
 @dataclass
+class GraphConfig:
+    """GraphRAG configuration."""
+    enabled: bool = os.getenv("GRAPH_ENABLED", "true").lower() == "true"
+    graph_dir: str = os.getenv("GRAPH_DIR", "data/graph")
+    hops: int = int(os.getenv("GRAPH_HOPS", "1"))
+    max_entities_per_text: int = int(os.getenv("GRAPH_MAX_ENTITIES_PER_TEXT", "8"))
+    max_relations_per_text: int = int(os.getenv("GRAPH_MAX_RELATIONS_PER_TEXT", "8"))
+    supporting_chunks: int = int(os.getenv("GRAPH_SUPPORTING_CHUNKS", "3"))
+    build_source: str = os.getenv("GRAPH_BUILD_SOURCE", "abstract_first")
+
+
+@dataclass
 class Config:
     """Main configuration container."""
     ollama: OllamaConfig = field(default_factory=OllamaConfig)
@@ -98,6 +110,7 @@ class Config:
     generation: GenerationConfig = field(default_factory=GenerationConfig)
     cpu_safe: CPUSafeConfig = field(default_factory=CPUSafeConfig)
     paths: PathsConfig = field(default_factory=PathsConfig)
+    graph: GraphConfig = field(default_factory=GraphConfig)
 
 
 # Global config instance

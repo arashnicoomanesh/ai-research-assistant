@@ -13,6 +13,7 @@ Constraints:
 """
 import json
 import logging
+import uuid
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 from dataclasses import dataclass, field
@@ -22,6 +23,7 @@ from src.core.llm import OllamaLLM, get_llm
 from src.core.embeddings import OllamaEmbeddings, get_embeddings
 from src.ingestion.indexer import get_indexer, IndexStats
 from src.ingestion.raptor_types import RaptorNode
+from qdrant_client.models import PointStruct, Filter, FieldCondition, MatchValue
 
 logger = logging.getLogger(__name__)
 
@@ -265,19 +267,18 @@ Summary:"""
         if not nodes:
             return
 
-        # Prepare vectors and payloads
-        vectors = []
         points = []
 
         for node in nodes:
             if node.embedding is None:
                 self._embed_node(node)
 
-            vectors.append(node.embedding)
+            # Generate deterministic UUID for Qdrant point ID
+            point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, node.chunk_id))
 
-            # Build payload - only include fields that exist in the schema
+            # Build payload with required fields
             payload = {
-                "chunk_id": node.chunk_id,
+                "chunk_id": node.chunk_id,  # Human-readable ID in payload
                 "paper_id": node.paper_id,
                 "title": node.title,
                 "section": node.section,
@@ -286,25 +287,21 @@ Summary:"""
                 "source_chunk_ids": node.source_chunk_ids,
                 "summary": node.summary,
                 "metadata": node.metadata,
+                "token_count": node.metadata.get("num_source_chunks", 0),  # Optional token count proxy
             }
 
-            point = type("PointStruct", (), {
-                "id": node.chunk_id,
-                "vector": node.embedding,
-                "payload": payload,
-            }())()
+            point = PointStruct(
+                id=point_id,
+                vector=node.embedding,
+                payload=payload,
+            )
 
             points.append(point)
 
         # Upsert in batches
         try:
-            # Split into batches if too many
             for i in range(0, len(points), self.batch_size):
                 batch = points[i:i + self.batch_size]
-                vectors_batch = vectors[i:i + self.batch_size]
-
-                # Build filter to avoid overwriting existing data
-                # We use the chunk_id as the unique identifier
                 self.client.upsert(
                     collection_name=config.qdrant.collection,
                     points=batch,
@@ -340,22 +337,20 @@ Summary:"""
             # Filter by paper_id if specified
             must_conditions = []
             if paper_id:
-                from qdrant_client.models import FieldCondition, MatchValue
                 must_conditions.append(FieldCondition(key="paper_id", match=MatchValue(value=paper_id)))
 
             if must_conditions:
-                from qdrant_client.models import Filter
-                chunks = indexer.client.scroll(
+                filter_obj = Filter(must=must_conditions)
+                results = indexer.client.scroll(
                     collection_name=config.qdrant.collection,
-                    scroll_filter=Filter(must=must_conditions),
+                    scroll_filter=filter_obj,
                     limit=10000,
                     with_payload=True,
                     with_vectors=False,
-                )[1]
-                chunks = [point.payload for point in chunks[0]]
+                )
+                chunks = [point.payload for point in results[0]]
             else:
                 # Retrieve child chunks only
-                from qdrant_client.models import Filter, FieldCondition, MatchValue
                 child_filter = Filter(
                     must=[FieldCondition(key="chunk_type", match=MatchValue(value="child"))]
                 )
@@ -384,27 +379,41 @@ Summary:"""
 
         # Step 3: Check for existing summaries (incremental building)
         existing_summary_ids = set()
+        existing_summaries = []
         try:
             # Retrieve all summary nodes to check what's already indexed
-            summaries = self.client.retrieve(
+            # Use scroll with filter for chunk_type == "summary"
+            summary_filter = Filter(
+                must=[FieldCondition(key="chunk_type", match=MatchValue(value="summary"))]
+            )
+            results = self.client.scroll(
                 collection_name=config.qdrant.collection,
-                ids=[],  # Get all points? Actually we need a different approach
+                scroll_filter=summary_filter,
                 limit=10000,
                 with_payload=True,
                 with_vectors=False,
             )
             # Filter payloads for summary nodes
-            for point in summaries:
+            for point in results[0]:
                 payload = point.payload
                 if payload.get("chunk_type") == "summary":
                     existing_summary_ids.add(payload.get("chunk_id", ""))
+                    # Also create RaptorNode for deduplication check
+                    existing_summaries.append(RaptorNode(
+                        chunk_id=payload.get("chunk_id", ""),
+                        paper_id=payload.get("paper_id", ""),
+                        title=payload.get("title", ""),
+                        section=payload.get("section", ""),
+                        level=payload.get("level", 1),
+                        chunk_type=payload.get("chunk_type", ""),
+                        summary=payload.get("summary", ""),
+                        source_chunk_ids=payload.get("source_chunk_ids", []),
+                        metadata=payload.get("metadata", {}),
+                        embedding=None,
+                    ))
         except Exception as e:
             logger.warning(f"Could not check existing summaries: {e}")
             # Continue without checking - will just create all summaries
-
-        # Step 4: Build summaries for each group
-        existing_summaries = [RaptorNode(**{k: v for k, v in s.items() if k != "embedding"})
-                            for s in existing_summary_ids] if existing_summary_ids else []
 
         all_new_nodes = []
         groups_processed = 0
@@ -463,21 +472,17 @@ Summary:"""
         Returns:
             List of RaptorNode objects
         """
-        must_conditions = []
+        must_conditions = [
+            FieldCondition(key="chunk_type", match=MatchValue(value="summary"))
+        ]
 
         if paper_id:
-            from qdrant_client.models import FieldCondition, MatchValue
             must_conditions.append(FieldCondition(key="paper_id", match=MatchValue(value=paper_id)))
 
         if level is not None:
-            from qdrant_client.models import FieldCondition, MatchValue
             must_conditions.append(FieldCondition(key="level", match=MatchValue(value=level)))
 
-        if must_conditions:
-            from qdrant_client.models import Filter
-            filter_obj = Filter(must=must_conditions)
-        else:
-            filter_obj = None
+        filter_obj = Filter(must=must_conditions)
 
         try:
             results = self.client.scroll(

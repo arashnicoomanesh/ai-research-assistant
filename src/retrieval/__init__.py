@@ -10,9 +10,30 @@ from src.retrieval.corrective_retriever import CorrectiveRetriever, CorrectiveRe
 from src.retrieval.multi_step_retriever import MultiStepRetriever, get_multi_step_retriever
 
 # Lazy import for raptor_retriever to avoid circular import
-def _get_raptor_retriever():
-    from src.retrieval.raptor_retriever import RaptorRetriever, get_raptor_retriever
-    return RaptorRetriever, get_raptor_retriever
+_RaptorRetriever = None
+_get_raptor_retriever_func = None
+
+def _load_raptor_retriever():
+    global _RaptorRetriever, _get_raptor_retriever_func
+    if _RaptorRetriever is None:
+        from src.retrieval.raptor_retriever import RaptorRetriever, get_raptor_retriever
+        _RaptorRetriever = RaptorRetriever
+        _get_raptor_retriever_func = get_raptor_retriever
+    return _RaptorRetriever, _get_raptor_retriever_func
+
+class _LazyRaptorModule:
+    def __getattr__(self, name):
+        if name in ("RaptorRetriever", "get_raptor_retriever"):
+            _RaptorRetriever, _get_raptor_retriever_func = _load_raptor_retriever()
+            return _RaptorRetriever if name == "RaptorRetriever" else _get_raptor_retriever_func
+        raise AttributeError(f"module 'src.retrieval' has no attribute '{name}'")
+
+import sys as _sys
+_module = _sys.modules[__name__]
+# Replace module's __getattr__ for lazy loading
+_lazy = _LazyRaptorModule()
+for _attr in ("RaptorRetriever", "get_raptor_retriever"):
+    setattr(_module, _attr, property(lambda self, _attr=_attr: getattr(_lazy, _attr)))
 
 __all__ = [
     "HybridRetriever",
@@ -38,10 +59,3 @@ __all__ = [
     "RaptorRetriever",
     "get_raptor_retriever",
 ]
-
-# Make RaptorRetriever and get_raptor_retriever available as attributes
-import sys as _sys
-_module = _sys.modules[__name__]
-_RaptorRetriever, _get_raptor_retriever = _get_raptor_retriever()
-setattr(_module, "RaptorRetriever", _RaptorRetriever)
-setattr(_module, "get_raptor_retriever", _get_raptor_retriever)

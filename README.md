@@ -58,6 +58,7 @@ Whether you're learning RAG internals, researching AI papers, or building a priv
 | **🔄 Corrective RAG (CRAG)** | Iterative retrieval with automatic correction when results are poor. |
 | **🧩 Multi-step retrieval** | Decomposes complex questions into sub-questions and retrieves per sub-question. |
 | **🌳 RAPTOR summaries** | Builds hierarchical summary layers from child chunks for improved retrieval. |
+| **🕸️ GraphRAG** | Knowledge graph extraction and retrieval for relational queries. |
 | **⚡ Semantic cache** | Caches question→answer mappings for repeat queries (fast, no re-computation). |
 | **✅ Faithfulness self-check** | Validates that generated answers are supported by retrieved sources. |
 | **📈 Evaluation harness** | Runs structured evaluations with metrics (latency, faithfulness, citation rate). |
@@ -133,9 +134,10 @@ The adaptive router selects a strategy for each query. Supported strategies:
 | `single_shot` | Corrective RAG (CRAG) — iterative retrieval with grading. | Standard queries needing paper evidence. |
 | `multi_step` | Decompose question into sub-questions, retrieve per sub-question. | Complex multi-part questions. |
 | `crag_raptor` | RAPTOR-enhanced hierarchical retrieval using summary layers. | Deep research questions needing structure. |
+| `graph_rag` | Knowledge graph retrieval with entity linking + neighborhood traversal. | Relational queries (how X relates to Y, what uses X, etc.). |
 | `cached_*` | Answer served from semantic cache (fast path). | Repeat queries. |
 
-Each strategy produces a **labeled answer** (e.g., `crag_refine`, `multi_step_3sub_2retrievals`, `raptor_survey`) so you can see exactly which path was taken.
+Each strategy produces a **labeled answer** (e.g., `crag_refine`, `multi_step_3sub_2retrievals`, `raptor_survey`, `graph_rag_relational`) so you can see exactly which path was taken.
 
 ---
 
@@ -273,12 +275,31 @@ python scripts/build_raptor.py --check
 python scripts/build_raptor.py --all --limit 3
 ```
 
-**RAPTOR process:**
-- Retrieves all child chunks from Qdrant.
-- Groups chunks by `paper_id` and `section`.
-- Iteratively builds summary nodes using the LLM, creating a hierarchy.
-- Summary nodes are stored in Qdrant for RAPTOR-enhanced retrieval.
-- Each level of summary provides increasingly abstract representations.
+### 🕸️ Build GraphRAG Knowledge Graph
+
+GraphRAG extracts entities and relations from paper content to build a local knowledge graph, enabling relational queries like "How is X related to Y?" or "What methods are based on X?"
+
+```bash
+# Build graph for all papers
+python scripts/build_graph.py
+
+# Build for one paper by ID
+python scripts/build_graph.py --paper ai_papers
+
+# Limit number of chunks (useful for testing)
+python scripts/build_graph.py --limit 10
+
+# Show graph statistics without building
+python scripts/build_graph.py --stats
+```
+
+**GraphRAG process:**
+- Retrieves paper chunks from Qdrant (prioritizing abstracts and important sections).
+- Extracts entities and relations using the LLM with a structured prompt.
+- Normalizes entity IDs and merges aliases (e.g., "Self-RAG" / "Self RAG").
+- Stores entities and relations in a local NetworkX graph persisted as JSON.
+- Supports incremental builds (skips already processed chunks).
+- Graph can be queried for neighborhood traversal and entity linking.
 
 ### 💬 Ask Questions
 
@@ -348,6 +369,7 @@ ai-research-assistant/
 │   ├── check_environment.py # Environment validation
 │   ├── ingest_papers.py     # Incremental paper ingestion pipeline
 │   ├── build_raptor.py      # RAPTOR hierarchical summary builder
+│   ├── build_graph.py       # GraphRAG knowledge graph builder
 │   └── run_eval.py          # Evaluation harness
 ├── src/
 │   ├── main.py              # CLI entry point
@@ -355,6 +377,12 @@ ai-research-assistant/
 │   │   ├── config.py        # Configuration management
 │   │   ├── llm.py           # Ollama LLM client
 │   │   └── embeddings.py    # Ollama embeddings client
+│   ├── graph/
+│   │   ├── __init__.py      # GraphRAG package
+│   │   ├── schema.py        # Entity, Relation, GraphEvidence models
+│   │   ├── entity_extractor.py # LLM-based entity/relation extraction
+│   │   ├── graph_store.py   # NetworkX graph persistence
+│   │   └── graph_retriever.py # Graph retrieval (entity linking + traversal)
 │   ├── ingestion/
 │   │   ├── pdf_parser.py    # PDF text extraction
 │   │   ├── chunker.py       # Structure-aware chunking
@@ -367,7 +395,8 @@ ai-research-assistant/
 │   │   ├── semantic_cache.py     # Caching
 │   │   ├── corrective_retriever.py # CRAG
 │   │   ├── multi_step_retriever.py # Multi-step retrieval
-│   │   └── raptor_retriever.py     # RAPTOR retrieval
+│   │   ├── raptor_retriever.py     # RAPTOR retrieval
+│   │   └── graph_retriever.py      # GraphRAG retrieval
 │   ├── routing/
 │   │   └── adaptive_router.py # Query routing
 │   ├── generation/
