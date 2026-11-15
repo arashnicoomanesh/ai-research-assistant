@@ -1,137 +1,162 @@
 <p align="center">
-  <img src="docs/single.webp" alt="AI Research Assistant" width="800">
+  <br>
+  <br>
+  <b><font size="+3">🧠 AI Research Assistant</font></b>
+  <br>
+  <br>
+  <i>A local-first, framework-free Advanced RAG lab that implements Adaptive routing, CRAG, multi-step retrieval, RAPTOR, semantic cache, and Stage-A GraphRAG in one coherent CPU-runnable system.</i>
+  <br>
+  <br>
+  <a href="https://www.python.org/"><img alt="Python 3.10+" src="https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white"></a>
+  <a href="https://opensource.org/licenses/MIT"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
+  <a href="https://ollama.ai"><img alt="Ollama" src="https://img.shields.io/badge/Ollama-local-black?logo=ollama&logoColor=white"></a>
+  <a href="https://qdrant.tech/"><img alt="Qdrant" src="https://img.shields.io/badge/Qdrant-vector%20DB-blueviolet"></a>
+  <a href="https://github.com/arashnicoomanesh/ai-research-assistant"><img alt="Local-First" src="https://img.shields.io/badge/Privacy-Local--First-success"></a>
+  <a href="https://github.com/arashnicoomanesh/ai-research-assistant"><img alt="No LangChain" src="https://img.shields.io/badge/No-LangChain%2FLlamaIndex-informational"></a>
+  <br>
+  <br>
+  <br>
 </p>
 
-# 🧠 AI Research Assistant
-
-
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Ollama](https://img.shields.io/badge/Ollama-local-black?logo=ollama&logoColor=white)](https://ollama.ai)
-[![Qdrant](https://img.shields.io/badge/Qdrant-vector%20DB-blueviolet)](https://qdrant.tech/)
-[![Local-First](https://img.shields.io/badge/Privacy-Local--First-success)](https://github.com/arashnicoomanesh/ai-research-assistant)
-[![No LangChain](https://img.shields.io/badge/No-LangChain%2FLlamaIndex-informational)](https://github.com/arashnicoomanesh/ai-research-assistant)
-
-> **A local, privacy-first RAG system for AI research papers — built from scratch without LangChain or LlamaIndex.**
 ---
 
-## 📑 Table of Contents
+## Why this repo is different
 
-- [Why This Project?](#-why-this-project)
-- [Features](#-features)
-- [Current Implementation Status](#-current-implementation-status)
-- [Architecture](#-architecture)
-- [Supported Query Strategies](#-supported-query-strategies)
-- [Demo: Automatic Strategy Selection](#-demo-automatic-strategy-selection)
-- [Quick Start](#-quick-start)
-- [Installation](#-installation)
-- [Usage](#-usage)
-  - [Ingest Papers](#-ingest-papers)
-  - [Build RAPTOR Summaries](#-build-raptor-summaries)
-  - [Build GraphRAG Knowledge Graph](#-build-graphrag-knowledge-graph)
-  - [Ask Questions](#-ask-questions)
-  - [Run Evaluations](#-run-evaluations)
-- [Project Structure](#-project-structure)
-- [Limitations & Notes on CPU Usage](#-limitations--notes-on-cpu-usage)
-- [Contributing](#-contributing)
-- [License](#-license)
+- **Explicit implementations** — Core RAG logic written from scratch; no LangChain/LlamaIndex in the critical path
+- **Multi-strategy Advanced RAG in one local system** — Adaptive routing, CRAG, multi-step, RAPTOR, GraphRAG, semantic cache
+- **CPU-runnable defaults** — 3B LLM + embeddings run on 8 GB RAM; `CPU_SAFE_MODE` keeps latency acceptable
+- **Inspectable routing decisions** — Every answer shows the chosen strategy (`graph_rag_relational`, `raptor_survey`, `crag_refine`, `cached_*`)
+- **Honest status + experimental GraphRAG Stage A** — Capability map below is the target scope; status audit is separate
+
+## Positioning
+
+This repository is an **Advanced RAG laboratory** — a complete, hackable system where every Advanced RAG technique is implemented explicitly and runs locally. It is not a wrapper around a framework; it is the framework, laid bare for study and extension. Use it to learn RAG internals, answer questions over AI research papers, or prototype new retrieval strategies without cloud APIs or hidden abstractions.
 
 ---
 
-## 🎯 Why This Project?
+## Capability Map (Full Target Scope)
 
-Most RAG tutorials rely on frameworks like LangChain or LlamaIndex, which abstract away the core logic. This project takes the opposite approach: **every component is implemented explicitly** so you can see exactly how a production-grade RAG pipeline works. It runs entirely on your local machine using **Ollama** for LLM/embedding services and **Qdrant** as the vector database—no cloud APIs, no hidden magic, no data leaving your computer.
+*What the lab covers — organized by subsystem. No status column here; see Implementation Status for the honest audit.*
 
-Whether you're learning RAG internals, researching AI papers, or building a privacy-sensitive document QA system, this repository provides a transparent, hackable foundation.
+### A. Data & Indexing
+- PDF ingestion pipeline (structure-aware parsing via pdfplumber/Docling)
+- Parent-child hierarchical chunking (sections preserved)
+- Incremental ingestion ledger (SHA-256 + SQLite record manager)
+- Qdrant dense vector indexing (child chunks searchable, parent chunks expandable)
+- CPU-safe embedding policy (abstract-first / children-only modes)
+- Metadata preservation (paper_id, section, chunk_type, token_count)
+
+### B. Core Query Pipeline
+- CLI QA interface (positional, `--question`, interactive)
+- Adaptive query routing (heuristics + optional LLM classifier)
+- Query rewriting (entity-aware, sometimes over-generalizes)
+- Dense vector retrieval (modern Qdrant `query_points` API)
+- Parent expansion (child→parent lookup via payload `chunk_id`)
+- Cited answer generation (grounded, per-source citations)
+- Semantic cache (exact-repeat HIT → instant answer)
+- CPU-Safe Mode (default ON; defers expensive ops)
+
+### C. Advanced RAG Modules
+- **Adaptive RAG** — Route per query type to the right strategy
+- **Corrective RAG (CRAG)** — Iterative retrieval with rewrite/merge when quality low
+- **Multi-step retrieval** — Decompose → sub-questions → per-sub retrieval → synthesize
+- **RAPTOR hierarchical summaries** — Build/merge summary layers from child chunks
+- **Document grading** — LLM-based relevance filter (OFF by default in CPU mode)
+- **Faithfulness self-check** — Answer-vs-sources validation (OFF by default in CPU mode)
+- **Semantic cache / cost optimization** — Dedupe identical queries; configurable TTL
+
+### D. GraphRAG Stack
+- Entity/relation extraction (LLM with 3-stage CPU fallback)
+- Local graph store (NetworkX MultiDiGraph + JSON persistence)
+- Alias canonicalization (e.g., "Self-RAG"/"SELF-RAG"/"Self Reflective RAG" → `self-rag`)
+- `graph_rag` routing path (technique/relational queries)
+- Heuristic entity linking (exact + fuzzy + token overlap)
+- 1-hop neighborhood traversal + triple collection
+- Supporting Qdrant chunk fusion for grounded answers
+- Graph-backed answer generation
+- **Stage B roadmap:** Community detection + global summary reports
+
+### E. Evaluation, Product & Ops
+- Environment checker (`scripts/check_environment.py`)
+- Evaluation harness (latency, cache hit rate, citation rate, strategy distribution)
+- CI (GitHub Actions)
+- Demo script (`scripts/demo_queries.sh`)
+- Architecture diagrams (`docs/architecture.webp`, `docs/graphrag-stage-a.webp`)
+- Reproducible local setup (Docker Qdrant + Ollama)
+- Future: strategy override CLI flag / optional UI
 
 ---
 
-## ✨ Features
+## Current Implementation Status
 
-| Category | Description |
-|---|---|
-| **🔒 Local-first** | Runs entirely on your machine with Ollama + Qdrant (no cloud APIs). |
-| **📄 Structure-aware chunking** | Preserves paper sections (Abstract, Introduction, Methods, Results, etc.). |
-| **🔍 Dense vector retrieval** | Qdrant vector search with child-chunk granularity + parent expansion. |
-| **🧭 Adaptive routing** | Chooses the retrieval strategy based on query type/intent. |
-| **📊 Document grading** | Filters irrelevant retrieved chunks; only relevant chunks are used (OFF by default in CPU mode). |
-| **📝 Cited answers** | Generates responses with paper citations and source metadata. |
-| **🔄 Corrective RAG (CRAG)** | Iterative retrieval with automatic correction when results are poor. |
-| **🧩 Multi-step retrieval** | Decomposes complex questions into sub-questions and retrieves per sub-question. |
-| **🌳 RAPTOR summaries** | Builds hierarchical summary layers from child chunks for improved retrieval. |
-| **🕸️ GraphRAG** | Local knowledge-graph extraction and relational retrieval (Stage A). |
-| **⚡ Semantic cache** | Caches question→answer mappings for repeat queries (fast, no re-computation). |
-| **✅ Faithfulness self-check** | Validates that generated answers are supported by retrieved sources (OFF by default in CPU mode). |
-| **📈 Evaluation harness** | Runs structured evaluations with metrics (latency, faithfulness, citation rate). |
+> Honest snapshot as of `2026-11-15`. Status labels: ✓ Working · ⚠️ Partial · 🧪 Experimental
 
----
-
-### 📊 Current Implementation Status
-
-> Honest snapshot of what works today, not a roadmap. Last verified: `2026-11-15`.
-
-#### 📥 A. Data & Indexing
-
+### A. Data & Indexing
 | Capability | Status | Notes |
 |---|---|---|
 | PDF ingestion | ✓ Working | 6 papers ingested |
-| Structure-aware parsing | ✓ Partial | `pdfplumber` path works; Docling optional / fallback |
+| Structure-aware parsing | ⚠️ Partial | pdfplumber path works; Docling optional/fallback |
 | Parent-child chunking | ✓ Working | Child for search, parent for expansion |
 | Incremental indexing (hash + SQLite) | ✓ Working | Record manager tracks papers |
 | Qdrant vector index | ✓ Working | `ai_papers` collection live |
-| Embed children / abstract only | ✓ Working | CPU-safe indexing |
+| CPU-safe indexing | ✓ Working | Abstract/children-only modes |
 | RAPTOR summary nodes | ✓ Working | Build + retrieval verified; summaries > 0 |
 
-#### 🔍 B. Core Query Pipeline
-
+### B. Core Query Pipeline
 | Capability | Status | Notes |
 |---|---|---|
-| CLI question interface | ✓ Working | positional + `--question` + interactive |
-| Semantic cache | ✓ Working | exact repeat = cache HIT |
-| Query rewriting | ✓ Working | sometimes over-generalizes entities |
+| CLI question interface | ✓ Working | positional / `--question` / interactive |
+| Semantic cache | ✓ Working | Exact repeat = cache HIT |
+| Query rewriting | ⚠️ Partial | Sometimes over-generalizes entities |
 | Adaptive routing | ✓ Working | `no_retrieval` / `single_shot` / `multi_step` / `crag_raptor` / `graph_rag` |
-| Dense retrieval (`query_points`) | ✓ Working | modern Qdrant API |
-| Parent expansion | ✓ Working | lookup by payload `chunk_id` |
-| Answer generation + citations | ✓ Working | grounded answers returned |
-| CPU-Safe Mode | ✓ Working | default ON for target hardware |
+| Dense retrieval (`query_points`) | ✓ Working | Modern Qdrant API |
+| Parent expansion | ✓ Working | Lookup by payload `chunk_id` |
+| Answer generation + citations | ✓ Working | Grounded answers returned |
+| CPU-Safe Mode | ✓ Working | Default ON for target hardware |
 
-#### 🧩 C. Advanced RAG Modules
-
+### C. Advanced RAG Modules
 | Module | Status | Evidence |
 |---|---|---|
 | Adaptive RAG | ✓ Implemented | Router chooses strategy by query type |
-| Corrective RAG (CRAG) | ✓ Implemented (lightweight in CPU mode) | rewrite / merge path used successfully |
-| Multi-Step Retrieval | ✓ Implemented | decomposition + per-sub retrieval code path |
-| RAPTOR | ✓ Working | builder + retriever paths verified |
-| GraphRAG (Stage A) | ⚠️ Partial | local graph + extraction + retrieval + routing; entity linking noisy; graph may contain extraction noise |
+| Corrective RAG (CRAG) | ✓ Implemented | Rewrite/merge path used (lightweight in CPU mode) |
+| Multi-Step Retrieval | ✓ Implemented | Decomposition + per-sub retrieval code path |
+| RAPTOR | ✓ Working | Builder + retriever paths verified |
+| Document grading | 🧪 Implemented, OFF by default | LLM grader disabled in CPU-Safe Mode |
+| Faithfulness self-check | 🧪 Implemented, OFF by default | Disabled in CPU-Safe Mode |
 | Semantic Caching | ✓ Implemented | HIT path verified |
-| Self-check / faithfulness | ⚠️ Implemented but OFF by default | disabled in CPU-Safe Mode |
-| LLM document grading | ⚠️ Implemented but OFF by default | falls back to vector score ranking |
 
-#### 🛠️ D. Engineering / Ops
-
+### D. GraphRAG Stack
 | Capability | Status | Notes |
 |---|---|---|
-| Environment checker | ✓ | — |
-| Ingest / stats CLI | ✓ | stats vector count display still buggy |
-| Eval harness | ✓ | code present |
-| README / packaging | ✓ | — |
-| GitHub repo + CI | ✓ | passing |
-| Architecture diagram in `docs/` | ✓ | added |
+| Entity/relation extraction | 🧪 Experimental | LLM with 3-stage CPU fallback |
+| Local graph store (NetworkX + JSON) | ✓ Working | Persists to `data/graph/graph.json` |
+| Alias canonicalization | ✓ Working | Self-RAG / SELF-RAG / Self Reflective → `self-rag` |
+| `graph_rag` routing | ⚠️ Partial | Heuristics + LLM; selects for technique/relational |
+| Entity linking | 🧪 Experimental | Heuristic (exact/fuzzy/token overlap); can over-link |
+| 1-hop traversal + triples | ✓ Working | Neighborhood + supporting chunk fusion |
+| Grounded graph answers | 🧪 Experimental | Quality varies with extraction noise |
+| Stage B (communities/global) | 🚫 Not implemented | Roadmap item |
 
----
+### E. Engineering / Ops
+| Capability | Status | Notes |
+|---|---|---|
+| Environment checker | ✓ Working | `scripts/check_environment.py` |
+| Ingest / stats CLI | ✓ Working | Stats vector count display still buggy |
+| Eval harness | ✓ Working | Code present |
+| CI | ✓ Working | GitHub Actions passing |
+| Architecture diagrams | ✓ Added | `docs/architecture.webp`, `docs/graphrag-stage-a.webp` |
 
 ### What works well now
-- End-to-end question answering with citations on local hardware
+- End-to-end QA with citations on local hardware (Ollama + Qdrant)
 - RAPTOR hierarchical summaries built and retrieved correctly
 - GraphRAG answers technique/relational queries (e.g., "What techniques does X introduce?")
-- CPU-safe defaults keep the system responsive on 3B models
+- CPU-Safe defaults keep the system responsive on 3B models
 - Semantic cache makes repeat queries instant
 
 ### Known limitations (GraphRAG)
 - Entity extraction noise: some spurious entities/relations in `graph.json`
 - Entity linking is heuristic (exact + fuzzy + token overlap) — can over-link or miss variants
-- Graph is built from CPU-model extractions; quality improves with larger models
+- Graph built from CPU-model extractions; quality improves with larger models
 - No community detection / global report generation (Microsoft-style GraphRAG not implemented)
 - `--dedupe` cleans aliases post-hoc but does not fix extraction errors
 
@@ -140,6 +165,7 @@ Whether you're learning RAG internals, researching AI papers, or building a priv
 ## 🏗️ Architecture
 
 ![Architecture](docs/architecture.webp)
+
 ---
 
 ## 🕸️ GraphRAG Stage A
@@ -155,7 +181,7 @@ Whether you're learning RAG internals, researching AI papers, or building a priv
 - Entity IDs normalized; aliases merged (e.g., "Self-RAG"/"SELF-RAG" → `self-rag`)
 - Graph stored as NetworkX JSON (`data/graph/graph.json`, local runtime artifact)
 - Adaptive router selects `graph_rag` for technique/relational queries
-- Retrieval links query entities, expands 1-hop neighborhood, fetches supporting Qdrant chunks
+- Retrieval links query entities, expands 1-hop neighborhood, fetches supporting Qdrt chunks
 
 **Stage B (planned):** Community detection + global summary generation (Microsoft-style GraphRAG)
 
@@ -175,34 +201,32 @@ python scripts/build_graph.py --stats
 
 ---
 
-## 🧭 Supported Query Strategies
+## Supported Query Strategies
 
-The adaptive router selects a strategy for each query. Supported strategies:
+The adaptive router selects a strategy per query. Each answer header shows the strategy label.
 
-| Strategy | Description | When Used |
+| Strategy | Description | Typical Trigger |
 |---|---|---|
-| `no_retrieval` | Answer from model knowledge without retrieval. | Simple factual questions, general knowledge. |
-| `single_shot` | Corrective RAG (CRAG) — iterative retrieval with grading. | Standard queries needing paper evidence. |
-| `multi_step` | Decompose question into sub-questions, retrieve per sub-question. | Complex multi-part questions. |
-| `crag_raptor` | RAPTOR-enhanced hierarchical retrieval using summary layers. | Deep research questions needing structure. |
-| `graph_rag` | Knowledge graph retrieval with entity linking + neighborhood traversal. | Relational queries (how X relates to Y, what uses X, etc.). |
-| `cached_*` | Answer served from semantic cache (fast path). | Repeat queries. |
-
-Each strategy produces a **labeled answer** (e.g., `crag_refine`, `multi_step_3sub_2retrievals`, `raptor_survey`, `graph_rag_relational`) so you can see exactly which path was taken.
+| `no_retrieval` | Answer from model knowledge without retrieval. | Simple factual / definitional |
+| `single_shot` | CRAG path — single retrieval + optional corrective step. | Standard fact-seeking |
+| `multi_step` | Decompose → sub-questions → per-sub retrieval → synthesize. | Complex multi-part |
+| `crag_raptor` | RAPTOR hierarchical retrieval via summary layers. | Survey / overview / deep-dive |
+| `graph_rag` | Entity linking → 1-hop traversal → grounded answer. | Technique list / relational |
+| `cached_*` | Served from semantic cache (instant). | Exact repeat query |
 
 ---
 
 ## 🎬 Demo: Automatic Strategy Selection
 
-The adaptive router selects the strategy automatically. Run these and watch the strategy label in the answer header/logs.
+The router picks the strategy automatically. Run these and watch the strategy label in the answer header/logs.
 
 **Curated demo queries:**
 
 ```bash
-# Definition-style → tends to route to single_shot / corrective path
+# Definition-style → tends to route to single_shot / CRAG path
 python src/main.py "What is Self-RAG?"
 
-# Technique / graph-oriented → tends to route to graph_rag
+# Technique extraction → tends to route to graph_rag
 python src/main.py "What techniques does Self-RAG introduce?"
 
 # Survey / overview → tends to route to crag_raptor (RAPTOR path)
@@ -235,8 +259,6 @@ python src/main.py "How is Self-RAG related to CRAG?"
 ---
 
 ## 📑 Quick Start
-
-For the impatient, here's the minimal path to a working system:
 
 > **⚡ CPU Note:** CPU-Safe Mode is ON by default. First answers take 1–4 min; repeats are instant via cache. Ollama + Qdrant must be running before you query.
 
@@ -277,54 +299,41 @@ python scripts/build_graph.py --limit 8
 python src/main.py "What is the attention mechanism in transformers?"
 ```
 
-> **Prerequisites:** Python 3.10+, [Ollama](https://ollama.ai), [Docker](https://docker.com) (for Qdrant).
+**Prerequisites:** Python 3.10+, [Ollama](https://ollama.ai), [Docker](https://docker.com) (for Qdrant).
 
 ---
 
 ## 🛠️ Installation
 
 ### 1. Install Python Dependencies
-
 ```bash
 pip install -r requirements.txt
 ```
 
 ### 2. Install & Start Ollama
-
 ```bash
 # Download from https://ollama.ai, then:
 ollama serve
-
-# Pull required models
 ollama pull qwen2.5-coder:3b      # LLM for generation
 ollama pull nomic-embed-text:v1.5 # Embedding model for search
-
-# Verify models are available:
 ollama list
 ```
 
 ### 3. Install & Start Qdrant (via Docker)
-
 ```bash
-# Install Docker from https://docker.com, then:
 docker run -d -p 6333:6333 -p 6334:6334 \
   -v $(pwd)/qdrant_storage:/qdrant/storage \
   qdrant/qdrant
-
-# Verify Qdrant is running:
 curl -s http://localhost:6333/ | head -5
-# Or visit http://localhost:6333 in your browser
 ```
 
 ### 4. Configure Environment
-
 ```bash
 cp .env.example .env
-# Edit .env if needed (default settings should work for most cases)
+# Edit .env if needed (defaults work for most cases)
 ```
 
 ### 5. (Optional) Download Additional Models
-
 See `.env.example` for available model names.
 
 ---
@@ -332,138 +341,49 @@ See `.env.example` for available model names.
 ## 🚀 Usage
 
 ### 📥 Ingest Papers
-
-1. Place PDF papers in the `data/papers/` directory.
-2. Run ingestion:
-
 ```bash
-# Incremental (default) — only processes new/changed papers
-python scripts/ingest_papers.py
-
-# Force re-index all papers (ignores hashes)
-python scripts/ingest_papers.py --force
-
-# Show statistics only
-python scripts/ingest_papers.py --stats
-
-# Clean records for deleted files
-python scripts/ingest_papers.py --clean
+# Place PDFs in data/papers/ first
+python scripts/ingest_papers.py                 # Incremental
+python scripts/ingest_papers.py --force         # Re-index all
+python scripts/ingest_papers.py --stats         # Show stats
+python scripts/ingest_papers.py --clean         # Clean deleted
 ```
 
-**What happens during ingestion:**
-- PDFs are parsed using `docling` (structure-aware).
-- Text is chunked using a parent-child hierarchy (parent chunks for summaries, child chunks for retrieval).
-- Chunks are indexed into Qdrant vector database.
-- Record metadata tracks processed files and hashes.
-
 ### 🌳 Build RAPTOR Summaries
-
-RAPTOR builds hierarchical summary layers from child chunks, enabling better retrieval for deep research questions. Build takes ~2–5 min per paper on CPU (3B model).
-
 ```bash
-# Build all summaries for all papers
-python scripts/build_raptor.py
-
-# Build for one paper by ID
+python scripts/build_raptor.py                  # Build all
 python scripts/build_raptor.py --paper ai_papers
-
-# Limit number of groups (useful for testing)
-python scripts/build_raptor.py --limit 5
-
-# Check existing summaries without building
-python scripts/build_raptor.py --check
-
-# Build all but limit to first N groups
-python scripts/build_raptor.py --all --limit 3
+python scripts/build_raptor.py --limit 5        # Test subset
+python scripts/build_raptor.py --check          # Inspect existing
+python scripts/build_raptor.py --all --limit 3  # Cap groups
 ```
 
 ### 🕸️ Build GraphRAG Knowledge Graph
-
-GraphRAG extracts entities and relations from paper content to build a local knowledge graph, enabling relational queries like "How is X related to Y?" or "What methods are based on X?"
-
-**Recommended (CPU-friendly, abstracts-first):**
 ```bash
-# Build graph from abstracts only (fast, ~30–60s)
+# Recommended: abstracts-first (CPU-friendly)
 python scripts/build_graph.py --limit 8
-
-# Or rebuild abstracts to enrich an existing graph
 python scripts/build_graph.py --rebuild-abstracts --limit 12
-```
 
-**Full / incremental options:**
-```bash
-# Build graph for all papers (abstracts + sections; slower, ~5–15 min)
-python scripts/build_graph.py
-
-# Build for one paper by ID
+# Full / incremental
+python scripts/build_graph.py                   # All papers
 python scripts/build_graph.py --paper ai_papers
-
-# Show graph statistics without building
-python scripts/build_graph.py --stats
-
-# Deduplicate existing graph nodes by alias merge (no LLM, ~1s)
-python scripts/build_graph.py --dedupe
+python scripts/build_graph.py --stats           # Node/edge counts
+python scripts/build_graph.py --dedupe          # Merge aliases (no LLM)
 ```
-
-**GraphRAG process:**
-- Retrieves paper chunks from Qdrant (prioritizing abstracts and important sections).
-- Extracts entities and relations using the LLM with a structured prompt (3-stage fallback for CPU models).
-- Normalizes entity IDs and merges aliases (e.g., "Self-RAG" / "SELF-RAG" / "Self Reflective Retrieval-Augmented Generation" → `self-rag`).
-- Stores entities and relations in a local NetworkX graph persisted as `data/graph/graph.json`.
-- Supports incremental builds (skips already processed chunks; `--dedupe` merges aliases post-hoc).
-- `graph.json` is a local runtime artifact (not committed to git).
 
 ### 💬 Ask Questions
-
 ```bash
-# Basic query (interactive or single-shot)
 python src/main.py "What is the attention mechanism in transformers?"
-
-# Interactive mode
 python src/main.py --interactive
-
-# With verbose logging
 python src/main.py -v "Compare transformer architectures"
 ```
 
-**Query flow:**
-1. Semantic cache check (if HIT, returns cached answer immediately).
-2. Query rewriting for better retrieval.
-3. Adaptive routing selects the best strategy.
-4. Retrieval, grading (if enabled), and generation.
-5. Faithfulness self-check (if enabled).
-6. Answer returned with citations.
-
 ### 📊 Run Evaluations
-
-The evaluation harness reads a JSONL file of questions and collects metrics.
-
 ```bash
-# Run all questions in the default file
 python scripts/run_eval.py
-
-# Run first 5 questions only
 python scripts/run_eval.py --limit 5
-
-# Run and save detailed report
 python scripts/run_eval.py --output my_report.json
-
-# Run with custom questions file
 python scripts/run_eval.py data/eval/questions.jsonl --limit 10
-```
-
-**Evaluation output:**
-- Summary metrics: average latency, cache hit rate, faithfulness rate, citation rate, retrieval success rate.
-- Strategy distribution across all questions.
-- Per-question details: strategy, latency, cache hit/fail, faithfulness.
-- Detailed JSON report saved to the specified output path.
-
-**Example questions JSONL format:**
-
-```json
-{"id": "1", "question": "What is attention mechanism?", "type": "factoid", "must_cite": true}
-{"id": "2", "question": "Compare transformer and LSTM architectures", "type": "comparative", "must_cite": true}
-{"id": "3", "question": "How does backpropagation work?", "type": "explain", "must_cite": false}
 ```
 
 ---
@@ -485,7 +405,8 @@ ai-research-assistant/
 │   ├── ingest_papers.py     # Incremental paper ingestion pipeline
 │   ├── build_raptor.py      # RAPTOR hierarchical summary builder
 │   ├── build_graph.py       # GraphRAG knowledge graph builder
-│   └── run_eval.py          # Evaluation harness
+│   ├── run_eval.py          # Evaluation harness
+│   └── demo_queries.sh      # Strategy selection demo
 ├── src/
 │   ├── main.py              # CLI entry point
 │   ├── core/
@@ -519,10 +440,12 @@ ai-research-assistant/
 │   └── evaluation/
 │       ├── metrics.py         # Metrics computation
 │       └── evaluator.py       # Evaluation orchestration
-├── requirements.txt          # Python dependencies
-├── .env.example              # Environment configuration template
-├── README.md                 # This file
-└── ...
+├── requirements.txt
+├── .env.example
+├── README.md
+└── docs/
+    ├── architecture.webp
+    └── graphrag-stage-a.webp
 ```
 
 ---
@@ -531,31 +454,38 @@ ai-research-assistant/
 
 | Aspect | Note |
 |---|---|
-| **Model sizes** | Default LLM `qwen2.5-coder:3b` and embeddings `nomic-embed-text:v1.5` work on CPU but are slower. For better performance, consider larger models or GPU acceleration. |
-| **Memory** | Loading multiple model instances consumes RAM. Default configuration is tuned for 8GB+ RAM. |
-| **Qdrant** | Vector search on CPU is functional but slower than GPU-accelerated alternatives. |
-| **RAPTOR** | Building summary layers requires multiple LLM calls. For large paper collections, use `--limit` to process incrementally. |
-| **GraphRAG extraction** | Entity/relation extraction is slow on 3B CPU (~1–2 min per chunk). Prefer `--limit` and abstracts-first (`--rebuild-abstracts`). |
-| **Multi-step** | Complex questions may generate multiple sub-questions, increasing latency proportionally. |
-| **Cache** | Semantic cache provides speedup for repeat queries but cache entries expire with paper re-ingestion. |
-| **CPU_SAFE_MODE** | Default ON: disables expensive grader, faithfulness self-check, and RAPTOR self-check to keep latency acceptable. |
-| **First-run latency** | First answers may take 1–4 minutes; cache makes repeats fast. |
+| **Model sizes** | Default LLM `qwen2.5-coder:3b` and embeddings `nomic-embed-text:v1.5` work on CPU but are slower. Larger models or GPU improve quality/speed. |
+| **Memory** | Multiple model instances consume RAM. Config tuned for 8 GB+. |
+| **Qdrant** | Vector search on CPU is functional but slower than GPU-accelerated. |
+| **RAPTOR** | Building summary layers needs multiple LLM calls. Use `--limit` for large collections. |
+| **GraphRAG extraction** | Entity/relation extraction ~1–2 min/chunk on 3B CPU. Prefer `--limit` and abstracts-first. |
+| **Multi-step** | Complex questions generate multiple sub-questions; latency scales. |
+| **Cache** | Semantic cache speeds repeats; expires on re-ingestion. |
+| **CPU_SAFE_MODE** | Default ON: disables grader, self-check, RAPTOR self-check for latency. |
+| **First-run latency** | First answers 1–4 min; repeats <2 s via cache. |
+
+---
+
+## Roadmap
+
+- **R2** GraphRAG linker/router hardening; strategy override CLI flag
+- **Eval** Baseline reports + strategy distribution dashboards
+- **Stage B** Community detection + global summaries for GraphRAG
+- Optional lightweight UI for interactive exploration
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are welcome! Here's how you can help:
+1. **Report bugs** — Clear description + reproduction steps
+2. **Suggest features** — Use case + proposed solution
+3. **Submit PRs** — Fork → feature branch → clear description
+4. **Improve docs** — Fix typos, clarify instructions, add examples
 
-1. **Report bugs** — Open an issue with a clear description and reproduction steps.
-2. **Suggest features** — Open an issue explaining the use case and proposed solution.
-3. **Submit pull requests** — Fork the repo, create a feature branch, and submit a PR with a clear description of changes.
-4. **Improve documentation** — Fix typos, clarify instructions, or add examples.
-
-Please ensure your code follows the existing style and includes tests where applicable.
+Follow existing code style; add tests where applicable.
 
 ---
 
 ## 📄 License
 
-This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
+MIT License. See [LICENSE](LICENSE) for details.
