@@ -1,7 +1,7 @@
 <p align="center">
   <br>
   <br>
-  <b><font size="+3">🧠 AI Research Assistant</font></b>
+  <b><font size="+10">🧠 AI Research Assistant</font></b>
   <br>
   <br>
   <i>A local-first, framework-free Advanced RAG lab that implements Adaptive routing, CRAG, multi-step retrieval, RAPTOR, semantic cache, and Stage-A GraphRAG in one coherent CPU-runnable system.</i>
@@ -170,7 +170,6 @@ This repository is an **Advanced RAG laboratory** — a complete, hackable syste
 
 ## 🕸️ GraphRAG Stage A
 
-![GraphRAG Stage A](docs/graphrag-stage-a.webp)
 
 **Scope:** Local entity–relation graph extracted from paper chunks.
 
