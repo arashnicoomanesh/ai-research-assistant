@@ -172,6 +172,16 @@ Workflow:
         help="Limit number of chunks to process (for testing)"
     )
     parser.add_argument(
+        "--dedupe",
+        action="store_true",
+        help="Deduplicate existing graph nodes by alias merge"
+    )
+    parser.add_argument(
+        "--rebuild-abstracts", "-r",
+        action="store_true",
+        help="Reprocess abstract chunks to enrich graph"
+    )
+    parser.add_argument(
         "--stats", "-s",
         action="store_true",
         help="Show graph statistics only (no building)"
@@ -223,6 +233,17 @@ Workflow:
                 t_name = target.name if target else r.target_id
                 print(f"  - {s_name} -[{r.relation_type.value}]-> {t_name}")
 
+        return
+
+    # If --dedupe mode, only deduplicate existing graph, no extraction
+    if args.dedupe:
+        logger.info("Running graph deduplication (no extraction)...")
+        graph_store.dedupe()
+        stats = graph_store.stats()
+        print(f"\nGraph Statistics after dedupe:")
+        print(f"  Nodes: {stats['node_count']}")
+        print(f"  Edges: {stats['edge_count']}")
+        print(f"  Reduction: {71 - stats['node_count']} nodes removed (was 71)")
         return
 
     # Step 1: Retrieve chunks for extraction

@@ -11,6 +11,7 @@ data/papers/
 data/processed/
 data/cache/
 data/eval/reports/
+data/graph/*.json
 qdrant_storage/
 *.db
 *.sqlite

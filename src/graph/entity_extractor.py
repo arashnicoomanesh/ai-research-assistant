@@ -18,12 +18,33 @@ logger = logging.getLogger(__name__)
 
 
 def _normalize_entity_id(name: str) -> str:
-    """Normalize entity name to a valid ID."""
+    """
+    Strongly normalize entity name to a canonical ID.
+
+    Steps:
+    1. lowercase
+    2. replace spaces and hyphens with single hyphen
+    3. strip punctuation (non-alphanumeric)
+    4. collapse repeated hyphens
+    5. remove leading/trailing hyphens
+    6. limit length
+    """
+    # 1. lowercase
     normalized = name.lower().strip()
-    normalized = re.sub(r'[^a-z0-9]+', '-', normalized)
+    # 2. replace spaces and hyphens with single hyphen
+    normalized = re.sub(r'[\s\-]+', '-', normalized)
+    # 3. strip punctuation (keep only alphanumeric and hyphens)
+    normalized = re.sub(r'[^a-z0-9-]', '', normalized)
+    # 4. collapse repeated hyphens
+    normalized = re.sub(r'-+', '-', normalized)
+    # 5. remove leading/trailing hyphens
     normalized = normalized.strip('-')
+    # 6. limit length
     if len(normalized) > 64:
         normalized = normalized[:64].strip('-')
+    # 7. if result is empty, fall back to a simplified version
+    if not normalized:
+        normalized = re.sub(r'[^a-z0-9]', '', name.lower())[:32].strip('-')
     return normalized
 
 
@@ -181,12 +202,11 @@ Return EXACTLY valid JSON with this structure - nothing else:
 }
 
 Constraints:
-- Max 4 entities total
-- Max 4 relations total
-- Use these relation types exactly: introduces, improves, based_on, compares_with, 
-  evaluates_on, reports, uses, addresses, related_to
+- Max 4 entities total. Preferred entity types: Method, Model, Technique, Metric, Task, Other
+- Max 4 relations total. Preferred relation types: introduces, uses, based_on, compares_with, addresses, evaluates_on, improves
 - High precision: only extract clear, explicit mentions
 - Include aliases for known variations
+- Use canonical names: "Self-RAG", "CRAG", "RAPTOR", "BERT", "GPT", "Transformer"
 - Temperature: 0 (deterministic)
 """
 

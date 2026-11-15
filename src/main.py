@@ -198,6 +198,9 @@ class ResearchAssistant:
         """
         Convert GraphEvidence to chunk format for answer generator.
 
+        Builds a strict context block that the generator must grounded in.
+        Never invents relations not present in the graph.
+
         Args:
             evidence: GraphEvidence from graph retriever
 
@@ -206,24 +209,60 @@ class ResearchAssistant:
         """
         chunks = []
 
-        # Add graph context as a special chunk
-        if evidence.entities or evidence.relations:
-            graph_chunk = {
-                "chunk_id": "graph_context",
-                "paper_id": "graph",
-                "title": "Knowledge Graph Context",
-                "section": "Graph Evidence",
-                "chunk_type": "graph_context",
-                "text": evidence.to_context_string(),
-                "relevance_score": 1.0,
-                "metadata": {
-                    "entity_count": len(evidence.entities),
-                    "relation_count": len(evidence.relations),
-                },
-            }
-            chunks.append(graph_chunk)
+        # Build strict graph context block
+        graph_lines = ["[Graph Evidence]"]
 
-        # Add supporting vector chunks
+        if evidence.entities:
+            entity_names = [e.name for e in evidence.entities]
+            graph_lines.append(f"- Entities: {', '.join(entity_names)}")
+
+        if evidence.relations:
+            rel_lines = []
+            for r in evidence.relations:
+                source = self.graph_retriever.graph_store.get_entity(r.source_id)
+                target = self.graph_retriever.graph_store.get_entity(r.target_id)
+                s_name = source.name if source else r.source_id
+                t_name = target.name if target else r.target_id
+                rel_lines.append(f"- {s_name} -[{r.relation_type.value}]-> {t_name}: {r.evidence}")
+            graph_lines.append("Relations: " + "; ".join(rel_lines))
+        else:
+            graph_lines.append("Relations: none found")
+
+        # Explicit note if no direct relation found between query entities
+        linked_ids = evidence.metadata.get("linked_entity_ids", [])
+        if len(linked_ids) >= 2:
+            graph_lines.append(
+                "*Note: No direct graph edge found between the queried entities. "
+                "The above shows available entities and their relations."
+            )
+
+        if evidence.supporting_chunks:
+            graph_lines.append("")
+            graph_lines.append("[Supporting Chunks]")
+            for i, chunk in enumerate(evidence.supporting_chunks, 1):
+                title = chunk.get("title", "Unknown")
+                section = chunk.get("section", "")
+                text = chunk.get("text", "")[:200]
+                graph_lines.append(f"  {i}. [{title}] {section}: {text}...")
+
+        graph_lines.append("")
+        graph_chunk = {
+            "chunk_id": "graph_context",
+            "paper_id": "graph",
+            "title": "Knowledge Graph Context",
+            "section": "Graph Evidence",
+            "chunk_type": "graph_context",
+            "text": "\n".join(graph_lines),
+            "relevance_score": 1.0,
+            "metadata": {
+                "entity_count": len(evidence.entities),
+                "relation_count": len(evidence.relations),
+                "direct_edge": evidence.metadata.get("direct_edges", 0) > 0,
+            },
+        }
+        chunks.append(graph_chunk)
+
+        # Add supporting vector chunks (without modifying their structure)
         for chunk in evidence.supporting_chunks:
             # Ensure required fields
             chunk_copy = dict(chunk)

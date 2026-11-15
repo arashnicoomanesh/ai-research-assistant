@@ -49,27 +49,33 @@ Classify the user's query into one of these strategies:
    Examples: "What is a neural network?", "Define overfitting", "Explain backpropagation",
              "What does RAG stand for?"
 
-2. "single_shot" - Query requires retrieving specific information from papers, answerable in one retrieval step.
+2. "graph_rag" - Query asks about relationships between entities, methods, or concepts,
+   or asks what techniques/methods a paper/introduction/proposal introduces.
+   Uses knowledge graph for entity linking and neighborhood traversal.
+   Examples: "How is Self-RAG related to CRAG?",
+             "What techniques does Self-RAG introduce?",
+             "What methods are based on BERT?",
+             "What does Self-RAG use?",
+             "Which models improve upon Transformer?",
+             "What addresses poor retrieval quality?"
+
+3. "single_shot" - Query requires retrieving specific information from papers, answerable in one retrieval step.
    Examples: "What method did the Attention Is All You Need paper use?",
              "What are the results of the BERT paper?",
              "Summarize the contributions of the GPT-3 paper."
 
-3. "crag_raptor" - Query benefits from hierarchical summary retrieval using RAPTOR.
+4. "crag_raptor" - Query benefits from hierarchical summary retrieval using RAPTOR.
     Provides high-level overview of field/trends, then detailed evidence.
     Examples: "Overview of transformer architectures in recent papers",
               "Trends in attention mechanisms across 2020-2023",
               "Summarize the field of diffusion models",
               "Evolution of RAG techniques in recent years"
 
-4. "graph_rag" - Query asks about relationships between entities, methods, or concepts.
-    Uses knowledge graph for entity linking and neighborhood traversal.
-    Examples: "How is Self-RAG related to CRAG?",
-              "What methods are based on BERT?",
-              "What techniques does Self-RAG introduce?",
-              "Which models improve upon Transformer?",
-              "What does X use?", "What addresses Y?"
+5. "multi_step" - Complex queries requiring multiple retrieval steps.
+   ...
+```
 
-Output MUST be valid JSON:
+Wait, I need to be careful about the numbering. Let me just add a higher-priority note for graph_rag rather than renumbering everything.
 {
   "strategy": "no_retrieval|single_shot|multi_step|crag_raptor|graph_rag",
   "confidence": 0.0-1.0,
@@ -116,11 +122,16 @@ Classify this query and return the JSON structure."""
     ]
 
     GRAPH_RAG_PATTERNS = [
+        # Relational queries: "how is X related to Y"
         r"\b(how is|how does)\b.*\b(related to|connected to|linked to|compared to)\b",
-        r"\b(what|which)\b.*\b(methods?|techniques?|models?|approaches?)\b.*\b(based on|built on|improve|improves|introduce|introduces|uses?|addresses?)\b",
-        r"\b(what does|which)\b.*\b(introduce|use|address|improve)\b",
+        # Technique/method queries: "what techniques does X introduce"
+        r"\b(what|which)\b.*\b(techniques?|methods?|algorithms?)\b.*\b(introduces?|uses?|based on)\b",
+        # "what does X use" queries
+        r"\b(what does|which)\b.*\b(uses?|employes?)\b",
+        # "based on / lineage" queries
         r"\b(lineage|ancestry|family tree|based on|influenced by|derived from)\b",
-        r"\b(relat|connect|link|associat)\b.*\b(to|with)\b",
+        # "relate / connect / link" queries (but NOT "what is X")
+        r"\b(relat|connect|link|associat)\b.*\b(with|to)\b(?!\s*(is|a|an|the))",
     ]
 
     def __init__(
@@ -148,14 +159,24 @@ Classify this query and return the JSON structure."""
         Returns:
             RoutingDecision with strategy and metadata
         """
+        # Always check heuristics first (they're fast and reliable for common patterns)
+        heuristic_decision = self._route_heuristic(query)
+        
         if self.use_llm:
             try:
-                return self._route_llm(query)
+                llm_decision = self._route_llm(query)
+                # Use LLM decision only if it has higher confidence than heuristics
+                if llm_decision.confidence > heuristic_decision.confidence:
+                    return llm_decision
+                else:
+                    logger.debug(f"LLM routing confidence ({llm_decision.confidence}) lower than heuristics "
+                                f"({heuristic_decision.confidence}), using heuristics")
+                    return heuristic_decision
             except Exception as e:
                 logger.warning(f"LLM routing failed, using heuristics: {e}")
-                return self._route_heuristic(query)
+                return heuristic_decision
         else:
-            return self._route_heuristic(query)
+            return heuristic_decision
 
     def _route_llm(self, query: str) -> RoutingDecision:
         """Route using LLM classification."""

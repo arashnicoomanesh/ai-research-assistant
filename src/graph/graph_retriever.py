@@ -5,7 +5,7 @@ Performs local graph retrieval: entity linking + neighborhood traversal.
 """
 import logging
 import re
-from typing import List, Dict, Any, Optional, Set
+from typing import List, Dict, Any, Optional, Set, Tuple
 from src.core.config import config
 from src.core.embeddings import OllamaEmbeddings, get_embeddings
 from src.retrieval.hybrid_retriever import get_retriever
@@ -23,11 +23,11 @@ class GraphRetriever:
     Local GraphRAG retrieval.
 
     Flow:
-    1. Entity linking from query (exact + fuzzy match)
-    2. Expand neighborhood (hops=1 or 2)
-    3. Collect relations among selected nodes
+    1. Entity linking from query (exact + fuzzy match ALL entities)
+    2. Expand neighborhood (hops=1 or 2 for each linked entity)
+    3. Collect relations among selected nodes (direct + shared-neighbor)
     4. Optionally fetch supporting vector chunks
-    5. Return GraphEvidence
+    5. Return GraphEvidence with explicit grounding
     """
 
     def __init__(
@@ -70,7 +70,7 @@ class GraphRetriever:
         """
         logger.info(f"Graph retrieval: query='{query}', paper_id={paper_id}, hops={self.hops}")
 
-        # Step 1: Entity linking from query
+        # Step 1: Entity linking from query - link ALL named entities
         linked_entities = self._link_entities(query)
         logger.info(f"Linked entities: {[e.name for e in linked_entities]}")
 
@@ -78,22 +78,29 @@ class GraphRetriever:
             logger.warning("No entities linked from query")
             return GraphEvidence(metadata={"fallback": True, "reason": "no_entities_linked"})
 
-        # Step 2: Expand neighborhood
-        entity_ids = self._expand_neighborhood([e.id for e in linked_entities])
-        logger.info(f"Expanded to {len(entity_ids)} entities (hops={self.hops})")
+        # Step 2: Expand neighborhood for EACH linked entity
+        all_entity_ids = set()
+        for e in linked_entities:
+            neighbors = self.graph_store.neighbors(e.id, hops=self.hops)
+            all_entity_ids.add(e.id)
+            all_entity_ids.update(neighbors)
+        logger.info(f"Expanded to {len(all_entity_ids)} entities (hops={self.hops})")
 
         # Step 3: Get entities and relations
         entities = []
-        for eid in entity_ids:
+        for eid in all_entity_ids:
             entity = self.graph_store.get_entity(eid)
             if entity:
                 entities.append(entity)
 
-        relations = self.graph_store.relations_of(list(entity_ids))
+        relations = self.graph_store.relations_of(list(all_entity_ids))
         logger.info(f"Found {len(relations)} relations among selected entities")
 
         # Step 4: Fetch supporting vector chunks
         supporting_chunks = self._fetch_supporting_chunks(query, linked_entities, paper_id)
+
+        # Step 5: Identify direct edges between originally linked entities
+        direct_edges = self._find_direct_edges(linked_entities, relations)
 
         evidence = GraphEvidence(
             entities=entities,
@@ -101,8 +108,9 @@ class GraphRetriever:
             supporting_chunks=supporting_chunks,
             metadata={
                 "linked_entity_ids": [e.id for e in linked_entities],
-                "expanded_entity_count": len(entity_ids),
+                "expanded_entity_count": len(all_entity_ids),
                 "relation_count": len(relations),
+                "direct_edges": len(direct_edges),
                 "supporting_chunk_count": len(supporting_chunks),
                 "hops": self.hops,
                 "paper_id": paper_id,
@@ -111,7 +119,8 @@ class GraphRetriever:
 
         logger.info(
             f"Graph retrieval complete: {len(entities)} entities, "
-            f"{len(relations)} relations, {len(supporting_chunks)} supporting chunks"
+            f"{len(relations)} relations, {len(supporting_chunks)} supporting chunks, "
+            f"{len(direct_edges)} direct edges"
         )
 
         return evidence
@@ -119,12 +128,13 @@ class GraphRetriever:
     def _link_entities(self, query: str) -> List[Entity]:
         """
         Link entities from query using exact and fuzzy matching.
+        Links ALL named entities found, not just the first one.
 
         Args:
             query: User query
 
         Returns:
-            List of linked Entity objects
+            List of linked Entity objects (may be 1 or more)
         """
         linked = []
         query_lower = query.lower()
@@ -170,12 +180,12 @@ class GraphRetriever:
                 # Check overlap
                 if query_tokens & entity_tokens:
                     overlap = len(query_tokens & entity_tokens)
-                    if overlap >= 2 or (overlap == 1 and len(entity_tokens) == 1):
+                    if overlap >= 2 or (overlap == 1 and len(entity_tokens) <= 3):
                         if entity not in linked:
                             linked.append(entity)
 
-        # Limit to top entities to avoid noise
-        return linked[:5]
+        # Limit but don't cap too aggressively - try to get all relevant entities
+        return linked[:8]
 
     def _expand_neighborhood(self, seed_entity_ids: List[str]) -> Set[str]:
         """
@@ -187,13 +197,42 @@ class GraphRetriever:
         Returns:
             Expanded set of entity IDs
         """
-        expanded = set(seed_entity_ids)
+        expanded = set()
 
         for entity_id in seed_entity_ids:
             neighbors = self.graph_store.neighbors(entity_id, hops=self.hops)
             expanded.update(neighbors)
 
         return expanded
+
+    def _find_direct_edges(
+        self, linked_entities: List[Entity], relations: List[Relation]
+    ) -> List[Dict[str, Any]]:
+        """
+        Find direct edges between originally linked entities.
+
+        Args:
+            linked_entities: The original entities linked from the query
+            relations: All relations in the expanded subgraph
+
+        Returns:
+            List of direct edge descriptions
+        """
+        linked_ids = {e.id for e in linked_entities}
+        direct = []
+
+        for r in relations:
+            if r.source_id in linked_ids and r.target_id in linked_ids:
+                direct.append(
+                    {
+                        "source": r.source_id,
+                        "target": r.target_id,
+                        "relation_type": r.relation_type.value,
+                        "evidence": r.evidence,
+                    }
+                )
+
+        return direct
 
     def _fetch_supporting_chunks(
         self,
@@ -216,22 +255,13 @@ class GraphRetriever:
             # Build filter for vector search
             must_conditions = []
 
+            # Use MatchValue for single paper_id (compatible with this qdrant-client version)
             if paper_id:
                 must_conditions.append(
                     FieldCondition(key="paper_id", match=MatchValue(value=paper_id))
                 )
-
-            # Optionally filter by entity paper_ids
-            entity_paper_ids = set()
-            for entity in linked_entities:
-                entity_paper_ids.update(entity.paper_ids)
-
-            if entity_paper_ids and not paper_id:
-                # Search across papers that have our entities
-                from qdrant_client.models import Filter, FieldCondition, MatchAny
-                must_conditions.append(
-                    FieldCondition(key="paper_id", match=MatchAny(value=list(entity_paper_ids)))
-                )
+            # If multiple entity paper_ids but no single paper_id, skip paper filter
+            # and rely on vector search + entity names in results
 
             query_filter = Filter(must=must_conditions) if must_conditions else None
 
