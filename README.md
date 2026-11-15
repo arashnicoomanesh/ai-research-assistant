@@ -142,6 +142,39 @@ Whether you're learning RAG internals, researching AI papers, or building a priv
 ![Architecture](docs/architecture.webp)
 ---
 
+## 🕸️ GraphRAG Stage A
+
+![GraphRAG Stage A](docs/graphrag-stage-a.webp)
+
+**Scope:** Local entity–relation graph extracted from paper chunks.
+
+**Flow:** extract → graph store → entity linking → 1-hop neighborhood traversal → supporting chunks → grounded answer
+
+**Stage A status (current):** Implemented end-to-end
+- `scripts/build_graph.py` builds the graph (LLM extraction with 3-stage CPU fallback)
+- Entity IDs normalized; aliases merged (e.g., "Self-RAG"/"SELF-RAG" → `self-rag`)
+- Graph stored as NetworkX JSON (`data/graph/graph.json`, local runtime artifact)
+- Adaptive router selects `graph_rag` for technique/relational queries
+- Retrieval links query entities, expands 1-hop neighborhood, fetches supporting Qdrant chunks
+
+**Stage B (planned):** Community detection + global summary generation (Microsoft-style GraphRAG)
+
+**Practical commands:**
+```bash
+# Abstracts-first, small batch (fast on CPU)
+python scripts/build_graph.py --limit 8
+
+# Deduplicate nodes by alias map (no LLM, ~1s)
+python scripts/build_graph.py --dedupe
+
+# Show node/edge counts and type breakdown
+python scripts/build_graph.py --stats
+```
+
+> **Notes:** GraphRAG is experimental. Entity linking is heuristic and can be noisy; extraction quality improves with larger models. Use `--limit` and abstracts-first on CPU. `graph.json` is not committed to git.
+
+---
+
 ## 🧭 Supported Query Strategies
 
 The adaptive router selects a strategy for each query. Supported strategies:
@@ -161,33 +194,41 @@ Each strategy produces a **labeled answer** (e.g., `crag_refine`, `multi_step_3s
 
 ## 🎬 Demo: Automatic Strategy Selection
 
-The router picks the strategy automatically. Run these and watch the strategy label in the output:
+The adaptive router selects the strategy automatically. Run these and watch the strategy label in the answer header/logs.
+
+**Curated demo queries:**
 
 ```bash
-# Definition → single_shot (CRAG path)
+# Definition-style → tends to route to single_shot / corrective path
 python src/main.py "What is Self-RAG?"
 
-# Technique extraction → graph_rag
+# Technique / graph-oriented → tends to route to graph_rag
 python src/main.py "What techniques does Self-RAG introduce?"
 
-# Relational → graph_rag
-python src/main.py "How is Self-RAG related to CRAG?"
-
-# Survey / overview → crag_raptor (RAPTOR path)
+# Survey / overview → tends to route to crag_raptor (RAPTOR path)
 python src/main.py "Give me an overview of advanced RAG methods in these papers"
 
-# Repeat → cached_* (instant)
+# Cache demo (second run should be fast)
 python src/main.py "What is Self-RAG?"
+
+# Optional relational demo (experimental — graph may be noisy)
+python src/main.py "How is Self-RAG related to CRAG?"
 ```
 
-**Expected behavior at a high level** (quality varies by CPU model size and graph noise):
-| Query type | Strategy | Typical output |
+**Expected routing tendencies** (not guarantees — router uses heuristics + LLM):
+
+| Query pattern | Typical strategy | What you see |
 |---|---|---|
-| "What is X?" | `single_shot` / `cached_*` | Definition with citation |
-| "What techniques does X introduce?" | `graph_rag` | List of techniques from graph edges |
+| "What is X?" | `single_shot` / `cached_*` | Definition + citations |
+| "What techniques does X introduce?" | `graph_rag` | Techniques from graph edges |
 | "How is X related to Y?" | `graph_rag` | Path/edges between entities |
-| "Overview of Z" | `crag_raptor` | Summary drawn from RAPTOR layers |
-| Repeat query | `cached_*` | Instant cached answer |
+| "Overview of Z" / "Survey of …" | `crag_raptor` | Summary from RAPTOR layers |
+| Repeat identical query | `cached_*` | Near-instant cached answer |
+
+**Timing notes (CPU, 3B model):**
+- First answers: 1–4 minutes (model loading + retrieval + generation)
+- Cache hits: <2 seconds
+- Strategy name appears in answer header (e.g., `graph_rag_relational`, `raptor_survey`, `crag_refine`)
 
 > Note: forced `--strategy` CLI flag is not the main interface yet; auto-routing + env flags (`CPU_SAFE_MODE`) control behavior.
 
@@ -196,6 +237,8 @@ python src/main.py "What is Self-RAG?"
 ## 📑 Quick Start
 
 For the impatient, here's the minimal path to a working system:
+
+> **⚡ CPU Note:** CPU-Safe Mode is ON by default. First answers take 1–4 min; repeats are instant via cache. Ollama + Qdrant must be running before you query.
 
 ```bash
 # 1. Clone the repo
@@ -215,13 +258,22 @@ docker run -d -p 6333:6333 -p 6334:6334 \
   -v $(pwd)/qdrant_storage:/qdrant/storage \
   qdrant/qdrant
 
-# 5. Configure environment
+# 5. Verify environment (optional but recommended)
+python scripts/check_environment.py
+
+# 6. Configure environment
 cp .env.example .env
 
-# 6. Ingest papers (place PDFs in data/papers/ first)
+# 7. Ingest papers (place PDFs in data/papers/ first)
 python scripts/ingest_papers.py
 
-# 7. Ask a question
+# 8. Build RAPTOR summaries (optional, ~2–5 min per paper)
+python scripts/build_raptor.py --all
+
+# 9. Build GraphRAG graph (optional, abstracts-first ~30–60s)
+python scripts/build_graph.py --limit 8
+
+# 10. Ask a question
 python src/main.py "What is the attention mechanism in transformers?"
 ```
 
