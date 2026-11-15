@@ -1,26 +1,17 @@
-<p align="center">
-  <br>
-  <br>
-  <div align="center">
+<div align="center">
 
-  # AI Research Assistant
+# AI Research Assistant
 
-  </div>
-  <br>
-  <br>
-  <i>A local-first, framework-free Advanced RAG lab that implements Adaptive routing, CRAG, multi-step retrieval, RAPTOR, semantic cache, and Stage-A GraphRAG in one coherent CPU-runnable system.</i>
-  <br>
-  <br>
-  <a href="https://www.python.org/"><img alt="Python 3.10+" src="https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white"></a>
-  <a href="https://opensource.org/licenses/MIT"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
-  <a href="https://ollama.ai"><img alt="Ollama" src="https://img.shields.io/badge/Ollama-local-black?logo=ollama&logoColor=white"></a>
-  <a href="https://qdrant.tech/"><img alt="Qdrant" src="https://img.shields.io/badge/Qdrant-vector%20DB-blueviolet"></a>
-  <a href="https://github.com/arashnicoomanesh/ai-research-assistant"><img alt="Local-First" src="https://img.shields.io/badge/Privacy-Local--First-success"></a>
-  <a href="https://github.com/arashnicoomanesh/ai-research-assistant"><img alt="No LangChain" src="https://img.shields.io/badge/No-LangChain%2FLlamaIndex-informational"></a>
-  <br>
-  <br>
-  <br>
-</p>
+A local-first, framework-free Advanced RAG lab that implements Adaptive routing, CRAG, multi-step retrieval, RAPTOR, semantic cache, and Stage-A GraphRAG in one coherent CPU-runnable system.
+
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Ollama](https://img.shields.io/badge/Ollama-local-black?logo=ollama&logoColor=white)](https://ollama.ai)
+[![Qdrant](https://img.shields.io/badge/Qdrant-vector%20DB-blueviolet)](https://qdrant.tech/)
+[![Local-First](https://img.shields.io/badge/Privacy-Local--First-success)](https://github.com/arashnicoomanesh/ai-research-assistant)
+[![No LangChain](https://img.shields.io/badge/No-LangChain%2FLlamaIndex-informational)](https://github.com/arashnicoomanesh/ai-research-assistant)
+
+</div>
 
 ---
 
