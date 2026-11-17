@@ -372,6 +372,12 @@ python src/main.py --interactive
 python src/main.py -v "Compare transformer architectures"
 ```
 
+### 🌐 UI (Streamlit)
+```bash
+pip install -r requirements.txt
+streamlit run ui/app.py
+```
+
 ### 📊 Run Evaluations
 ```bash
 python scripts/run_eval.py
