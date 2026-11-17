@@ -90,6 +90,17 @@ Wait, I need to be careful about the numbering. Let me just add a higher-priorit
 Classify this query and return the JSON structure."""
 
     # Heuristic patterns for fallback classification
+    # Order matters: check more specific patterns first
+    DEFINITION_PATTERNS = [
+        # Single-shot definition/what-is patterns - should prefer single_shot
+        r"\b(what is|define|definition of)\b",
+        r"\b(what is|define|definition of)\b.*\b(neural network|transformer|overfitting|backpropagation|gradient descent|loss function|activation function|regularization|dropout|batch norm|layer norm|embedding|tokenizer|fine-tuning|transfer learning|zero-shot|few-shot|in-context learning|diffusion model|variational autoencoder|GAN|CNN|RNN|LSTM)\b",
+        r"\b(what does)\b.*\b(stand for|mean)\b",
+        r"\bexplain\b",
+        # Note: "Explain X" when NOT explicitly relational goes to single_shot,
+        # but "Explain how X is related to Y" goes to graph_rag
+    ]
+
     NO_RETRIEVAL_PATTERNS = [
         r"\b(what is|define|definition of|explain|describe)\b.*\b(neural network|transformer|attention|overfitting|backpropagation|gradient descent|loss function|activation function|regularization|dropout|batch norm|layer norm|embedding|tokenizer|fine-tuning|transfer learning|zero-shot|few-shot|in-context learning|RLHF|RAG|retrieval augmented|diffusion model|variational autoencoder|GAN|CNN|RNN|LSTM|BERT|GPT)\b",
         r"\bhow does\b.*\b(work|function)\b",
@@ -149,16 +160,37 @@ Classify this query and return the JSON structure."""
         self.llm = llm or get_llm()
         self.use_llm = use_llm
 
-    def route(self, query: str) -> RoutingDecision:
+    def route(self, query: str, original_query: Optional[str] = None) -> RoutingDecision:
         """
         Route a query to the appropriate strategy.
 
         Args:
-            query: User query
+            query: User query (may be rewritten)
+            original_query: Original user query before rewriting (optional)
 
         Returns:
             RoutingDecision with strategy and metadata
         """
+        # Check definition patterns on the ORIGINAL query before rewrite influence wins
+        # This ensures "What is X?", "Define X", "Explain X" prefer single_shot
+        # even after the query rewriter expands terms
+        if original_query is not None:
+            orig_lower = original_query.lower()
+            for pattern in self.DEFINITION_PATTERNS:
+                if re.search(pattern, orig_lower):
+                    # Check if it's a purely definition question (no relational words like "related to")
+                    is_relational = bool(re.search(r"\b(related to|connected to|linked to|compares with|based on)\b", orig_lower))
+                    if not is_relational:
+                        # Pure definition from original query -> single_shot, override rewrite influence
+                        return RoutingDecision(
+                            strategy="single_shot",
+                            confidence=0.75,
+                            reasoning=f"Heuristic matched single_shot (definition from original query): {pattern}",
+                            query_type="factual",
+                            use_raptor=False,
+                            use_graph=False,
+                        )
+
         # Always check heuristics first (they're fast and reliable for common patterns)
         heuristic_decision = self._route_heuristic(query)
         
@@ -215,6 +247,33 @@ Classify this query and return the JSON structure."""
     def _route_heuristic(self, query: str) -> RoutingDecision:
         """Route using heuristic pattern matching."""
         query_lower = query.lower()
+
+        # Check for DEFINITION patterns first (should prefer single_shot)
+        # "What is X?", "Define X", "Explain X" when not explicitly relational
+        for pattern in self.DEFINITION_PATTERNS:
+            if re.search(pattern, query_lower):
+                # Check if it's a purely definition question (no relational words like "related to")
+                is_relational = bool(re.search(r"\b(related to|connected to|linked to|compares with|based on)\b", query_lower))
+                if is_relational:
+                    # Relational definition -> graph_rag
+                    return RoutingDecision(
+                        strategy="graph_rag",
+                        confidence=0.75,
+                        reasoning=f"Heuristic matched graph_rag (relational definition): {pattern}",
+                        query_type="relational",
+                        use_raptor=False,
+                        use_graph=True,
+                    )
+                else:
+                    # Pure definition -> single_shot
+                    return RoutingDecision(
+                        strategy="single_shot",
+                        confidence=0.75,
+                        reasoning=f"Heuristic matched single_shot (definition): {pattern}",
+                        query_type="factual",
+                        use_raptor=False,
+                        use_graph=False,
+                    )
 
         # Check for GRAPH_RAG indicators first (relational queries)
         for pattern in self.GRAPH_RAG_PATTERNS:

@@ -12,10 +12,27 @@ from src.retrieval.hybrid_retriever import get_retriever
 from src.retrieval.qdrant_search import qdrant_search
 from qdrant_client.models import Filter, FieldCondition, MatchValue
 from src.graph.schema import Entity, Relation, GraphEvidence
-from src.graph.graph_store import get_graph_store, GraphStore
+from src.graph.graph_store import get_graph_store, GraphStore, _normalize_entity_id
 from src.graph.entity_extractor import get_entity_extractor, EntityExtractor
 
 logger = logging.getLogger(__name__)
+
+# Canonical entity ID map for strong alias resolution
+_CANONICAL_ALIASES = {
+    "self-rag": ["self-rag", "self rag", "self-reflective rag", "self reflective retrieval augmented generation"],
+    "crag": ["crag", "corrective rag", "corrective retrieval augmented generation"],
+    "raptor": ["raptor", "raptor model", "recursive abstractive processing"],
+    "reflection-tokens": ["reflection tokens", "reflection token", "reflective tokens"],
+}
+
+# Generic/weak tokens that should be rejected unless exact canonical match
+_GENERIC_TOKENS = {"llm", "llms", "model", "models", "method", "methods", "paper", "papers", "study", "work", "approach", "technique", "techniques", "algorithm", "algorithms", "system", "systems", "framework", "frameworks", "architecture", "architectures", "transformer", "transformers", "attention", "bert", "gpt", "t5", "bart"}
+
+# Minimum length for a token to be considered for fuzzy matching
+_MIN_TOKEN_LEN = 3
+
+# Maximum number of linked seed entities to return
+_MAX_LINKED_SEEDS = 3
 
 
 class GraphRetriever:
@@ -127,65 +144,120 @@ class GraphRetriever:
 
     def _link_entities(self, query: str) -> List[Entity]:
         """
-        Link entities from query using exact and fuzzy matching.
-        Links ALL named entities found, not just the first one.
-
-        Args:
-            query: User query
+        Link entities from query using exact and fuzzy matching with precision controls.
 
         Returns:
-            List of linked Entity objects (may be 1 or more)
+            List of linked Entity objects (capped to top 1-3 strongest matches)
         """
         linked = []
         query_lower = query.lower()
 
-        # Get all entities from graph
-        all_entities = self.graph_store.all_entities()
-
-        # Build name -> entity mapping for exact match
-        name_to_entity = {}
-        for entity in all_entities:
-            name_to_entity[entity.name.lower()] = entity
-            for alias in entity.aliases:
-                name_to_entity[alias.lower()] = entity
-
-        # 1. Exact match on full entity names/aliases
-        for name, entity in name_to_entity.items():
-            if name in query_lower and entity not in linked:
-                linked.append(entity)
-
-        # 2. Fuzzy match: check if query contains entity name or vice versa
-        if not linked:
-            for entity in all_entities:
-                entity_name_lower = entity.name.lower()
-                # Check if entity name is substring of query or query is substring of entity
-                if entity_name_lower in query_lower or query_lower in entity_name_lower:
-                    if entity not in linked:
-                        linked.append(entity)
-                        continue
-
-                # Check aliases
-                for alias in entity.aliases:
-                    alias_lower = alias.lower()
-                    if alias_lower in query_lower or query_lower in alias_lower:
-                        if entity not in linked:
+        # Step 0: Strong canonical alias force-match (before other matching)
+        # These are high-priority known entities that must be linked if present
+        canonical_linked: Set[str] = set()
+        for canonical_id, aliases in _CANONICAL_ALIASES.items():
+            for alias in aliases:
+                if alias in query_lower:
+                    # Find the entity with this canonical ID from the graph
+                    all_entities = self.graph_store.all_entities()
+                    for entity in all_entities:
+                        if entity.id == canonical_id and canonical_id not in canonical_linked:
                             linked.append(entity)
+                            canonical_linked.add(canonical_id)
+                            logger.debug(f"Canonical alias force-match: {entity.name} (id={entity.id})")
                             break
 
-        # 3. Token-based matching for compound names
-        if not linked:
-            query_tokens = set(re.findall(r'\b\w+\b', query_lower))
-            for entity in all_entities:
-                entity_tokens = set(re.findall(r'\b\w+\b', entity.name.lower()))
-                # Check overlap
-                if query_tokens & entity_tokens:
-                    overlap = len(query_tokens & entity_tokens)
-                    if overlap >= 2 or (overlap == 1 and len(entity_tokens) <= 3):
-                        if entity not in linked:
-                            linked.append(entity)
+        # 1. Exact match on full entity names/aliases (HIGHEST PRECISION)
+        exact_matches = []
+        for entity in self.graph_store.all_entities():
+            if entity.id in canonical_linked:
+                continue
+            name_lower = entity.name.lower()
+            # Check direct name match
+            if name_lower in query_lower:
+                exact_matches.append(entity)
+            # Check alias match
+            for alias in entity.aliases:
+                if alias.lower() in query_lower and entity not in exact_matches:
+                    exact_matches.append(entity)
+                    break
 
-        # Limit but don't cap too aggressively - try to get all relevant entities
-        return linked[:8]
+        # 2. Strong alias match from canonical alias map (supplementary)
+        alias_matches = []
+        for canonical_id, aliases in _CANONICAL_ALIASES.items():
+            if canonical_id in canonical_linked:
+                continue
+            for alias in aliases:
+                if alias in query_lower:
+                    # Find the entity with this canonical ID
+                    all_entities = self.graph_store.all_entities()
+                    for entity in all_entities:
+                        if entity.id == canonical_id and entity not in alias_matches and entity not in exact_matches:
+                            alias_matches.append(entity)
+                            break
+
+        # 3. Fuzzy match: token overlap with strict thresholds
+        fuzzy_matches = []
+        query_tokens = set(re.findall(r'\b\w+\b', query_lower))
+        # Filter out generic/weak tokens (note: "self-rag" tokens are preserved
+        # since "rag" was removed from _GENERIC_TOKENS above)
+        query_tokens = {t for t in query_tokens if len(t) >= _MIN_TOKEN_LEN and t not in _GENERIC_TOKENS}
+
+        if query_tokens:
+            all_entities = self.graph_store.all_entities()
+            for entity in all_entities:
+                if entity in exact_matches or entity in alias_matches or entity in fuzzy_matches:
+                    continue
+                entity_name_lower = entity.name.lower()
+                entity_tokens = set(re.findall(r'\b\w+\b', entity_name_lower))
+                entity_tokens = {t for t in entity_tokens if len(t) >= _MIN_TOKEN_LEN and t not in _GENERIC_TOKENS}
+
+                # Check aliases too
+                alias_tokens = set()
+                for alias in entity.aliases:
+                    alias_tokens.update(re.findall(r'\b\w+\b', alias.lower()))
+                alias_tokens = {t for t in alias_tokens if len(t) >= _MIN_TOKEN_LEN and t not in _GENERIC_TOKENS}
+                entity_tokens.update(alias_tokens)
+
+                if not entity_tokens:
+                    continue
+
+                overlap = query_tokens & entity_tokens
+                if not overlap:
+                    continue
+
+                # Strict threshold: require >= 2 token overlap OR single strong token
+                overlap_count = len(overlap)
+                entity_token_count = len(entity_tokens)
+
+                # Score: overlap ratio * entity specificity
+                if entity_token_count > 0:
+                    score = overlap_count / entity_token_count
+                    # Require strong match
+                    if score >= 0.6 or (overlap_count >= 2 and entity_token_count <= 4):
+                        fuzzy_matches.append((entity, score))
+
+        # Sort fuzzy by score descending
+        fuzzy_matches.sort(key=lambda x: x[1], reverse=True)
+        fuzzy_entities = [e for e, s in fuzzy_matches]
+
+        # Combine in priority order: exact -> alias -> fuzzy
+        for entity in exact_matches:
+            linked.append(entity)
+            logger.debug(f"Exact match: {entity.name} (id={entity.id})")
+        for entity in alias_matches:
+            linked.append(entity)
+            logger.debug(f"Alias match: {entity.name} (id={entity.id})")
+        for entity in fuzzy_entities:
+            linked.append(entity)
+            logger.debug(f"Fuzzy match: {entity.name} (id={entity.id})")
+
+        # Cap to max seeds
+        if len(linked) > _MAX_LINKED_SEEDS:
+            logger.info(f"Capping linked entities from {len(linked)} to {_MAX_LINKED_SEEDS}")
+            linked = linked[:_MAX_LINKED_SEEDS]
+
+        return linked
 
     def _expand_neighborhood(self, seed_entity_ids: List[str]) -> Set[str]:
         """

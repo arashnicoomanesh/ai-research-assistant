@@ -231,10 +231,12 @@ class ResearchAssistant:
         # Explicit note if no direct relation found between query entities
         linked_ids = evidence.metadata.get("linked_entity_ids", [])
         if len(linked_ids) >= 2:
-            graph_lines.append(
-                "*Note: No direct graph edge found between the queried entities. "
-                "The above shows available entities and their relations."
-            )
+            has_direct_edge = evidence.metadata.get("direct_edges", 0) > 0
+            if not has_direct_edge:
+                graph_lines.append(
+                    "*No direct relation edge was found in the local graph. "
+                    "The above shows available entities and their relations."
+                )
 
         if evidence.supporting_chunks:
             graph_lines.append("")
@@ -305,8 +307,8 @@ class ResearchAssistant:
         if rewritten.alternatives:
             logger.debug("Alternatives: %s", rewritten.alternatives)
 
-        # Step 3: Route the (rewritten) query
-        routing = self.router.route(search_query)
+        # Step 3: Route the (rewritten) query, passing original for definition pattern check
+        routing = self.router.route(search_query, original_query=query)
         logger.info("Routing: strategy=%s, confidence=%.2f, type=%s, reason=%s, use_raptor=%s",
                     routing.strategy, routing.confidence, routing.query_type, routing.reasoning,
                     routing.use_raptor)
