@@ -73,6 +73,8 @@ class CPUSafeConfig:
     enable_self_check: bool = os.getenv("ENABLE_SELF_CHECK", "false").lower() == "true"
     retrieve_top_k: int = int(os.getenv("RETRIEVE_TOP_K", "5"))
     context_top_k: int = int(os.getenv("CONTEXT_TOP_K", "5"))
+    reliable_mode: bool = os.getenv("RELIABLE_MODE", "true").lower() == "true"
+    experimental_routing: bool = os.getenv("EXPERIMENTAL_ROUTING", "false").lower() == "true"
 
 
 @dataclass

@@ -309,6 +309,22 @@ class ResearchAssistant:
 
         # Step 3: Route the (rewritten) query, passing original for definition pattern check
         routing = self.router.route(search_query, original_query=query)
+        
+        # Phase Q1: Reliable mode override - force single_shot for normal questions
+        # when Reliable Mode is ON (default), unless Experimental Routing is enabled
+        if config.cpu_safe.reliable_mode and not config.cpu_safe.experimental_routing:
+            # Only force single_shot if not already single_shot and not no_retrieval
+            if routing.strategy not in ("single_shot", "no_retrieval"):
+                # Preserve the original reasoning but change the strategy
+                routing = RoutingDecision(
+                    strategy="single_shot",
+                    confidence=0.75,
+                    reasoning=routing.reasoning + " (reliable mode forced to single_shot)",
+                    query_type=routing.query_type,
+                    use_raptor=False,
+                    use_graph=False,
+                )
+                logger.info("Reliable mode: overridden strategy from %s to single_shot", routing.strategy)
         logger.info("Routing: strategy=%s, confidence=%.2f, type=%s, reason=%s, use_raptor=%s",
                     routing.strategy, routing.confidence, routing.query_type, routing.reasoning,
                     routing.use_raptor)

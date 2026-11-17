@@ -70,6 +70,8 @@ def run_assistant_query(question: str) -> None:
             latency = time.time() - start
 
         # Store results
+        gen_status = getattr(answer, "generation_status", "ok")
+        gen_fallback = getattr(answer, "fallback_type", "none")
         st.session_state.last_answer = {
             "answer": answer.answer,
             "strategy": answer.strategy,
@@ -77,6 +79,8 @@ def run_assistant_query(question: str) -> None:
             "sources": getattr(answer, "sources", []),
             "latency": latency,
             "faithful": getattr(answer, "faithful", True),
+            "generation_status": gen_status,
+            "fallback_type": gen_fallback,
         }
         st.session_state.last_query = question
         st.rerun()

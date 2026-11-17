@@ -27,6 +27,8 @@ class GeneratedAnswer:
     confidence: float = 1.0
     self_check_reasoning: str = ""
     multi_step_metadata: Optional[Dict[str, Any]] = None  # for tracking multi-step process
+    generation_status: str = "ok"  # "ok" | "failed" | "timeout"
+    fallback_type: str = "none"  # "none" | "graceful_failure"
 
 
 class AnswerGenerator:
@@ -181,13 +183,18 @@ Is the answer faithful to the context? Return JSON only."""
                 # Re-check the regenerated answer
                 faithful, confidence, self_check_reasoning = self._self_check(query, context, answer)
 
-        # If generation failed, create extractive fallback answer
+        # If generation failed, create structured failure response
         if generation_failed:
-            logger.warning("LLM generation failed, creating extractive fallback answer")
-            answer = self._extractive_fallback(query, context_chunks)
-            faithful = True
-            confidence = 0.5
-            self_check_reasoning = "Fallback extractive answer (generation failed)"
+            logger.warning("LLM generation failed, creating structured failure response")
+            answer = "I retrieved relevant sources, but answer generation failed on this local CPU setup. Please retry, shorten the question, or use a stronger model."
+            fallback_type = "graceful_failure"
+            generation_status = "failed"
+            faithful = False
+            confidence = 0.3
+            self_check_reasoning = "LLM generation timed out/failed"
+        else:
+            fallback_type = "none"
+            generation_status = "ok"
 
         # Extract sources used
         sources = self._extract_sources(context_chunks, multi_step_mode=multi_step_mode)
@@ -212,6 +219,8 @@ Is the answer faithful to the context? Return JSON only."""
             confidence=confidence,
             self_check_reasoning=self_check_reasoning,
             multi_step_metadata=multi_step_meta,
+            generation_status=generation_status,
+            fallback_type=fallback_type,
         )
 
     def _generate_answer(
@@ -434,6 +443,8 @@ Be concise and accurate. If you're not certain, say so."""
                 faithful=True,
                 confidence=0.8,
                 self_check_reasoning="No retrieval needed, answered from model knowledge",
+                generation_status="ok",
+                fallback_type="none",
             )
 
         except Exception as e:
@@ -446,6 +457,8 @@ Be concise and accurate. If you're not certain, say so."""
                 faithful=False,
                 confidence=0.0,
                 self_check_reasoning=f"Generation error: {e}",
+                generation_status="failed",
+                fallback_type="graceful_failure",
             )
 
 

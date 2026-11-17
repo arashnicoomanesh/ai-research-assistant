@@ -50,6 +50,10 @@ def render_answer_card(
     # Determine cache badge
     cache_badge = "⚡ Cache hit" if cache_hit else "🔍 Fresh retrieval"
 
+    # Generation status info
+    generation_status = metadata.get("generation_status", "ok") if metadata else "ok"
+    fallback_type = metadata.get("fallback_type", "none") if metadata else "none" if metadata else ""
+
     with st.container():
         st.markdown("---")
         # Header row with strategy and cache
@@ -62,6 +66,11 @@ def render_answer_card(
 
         # Answer text
         st.markdown(answer)
+
+        # Generation status badge (only show if not ok)
+        if generation_status != "ok":
+            status_color = "🔴" if generation_status == "failed" else "🟡"
+            st.caption(f"{status_color} Generation: {generation_status} ({fallback_type})")
 
         # Sources
         if sources:
@@ -80,6 +89,8 @@ def render_answer_card(
         if metadata:
             with st.expander("Details", expanded=False):
                 for k, v in metadata.items():
+                    if k in ("generation_status", "fallback_type"):
+                        continue  # already shown above
                     st.write(f"**{k}**: {v}")
 
 
