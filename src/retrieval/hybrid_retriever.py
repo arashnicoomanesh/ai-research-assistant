@@ -1,7 +1,8 @@
 """
 Hybrid Retriever for AI Research Papers.
 
-Combines dense vector search (Qdrant) with optional BM25 keyword search.
+Combines dense vector search (Qdrant) with optional BM25 keyword search
+and optional cross-encoder reranking.
 Retrieves child chunks for granular retrieval, returns parent_id for context expansion.
 Explicit implementation without LangChain/LlamaIndex.
 """
@@ -10,10 +11,11 @@ from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchValue
-from src.core.config import config
+from src.core.config import get_config
 from src.core.embeddings import OllamaEmbeddings, get_embeddings
 from src.retrieval.qdrant_search import qdrant_search
 from src.retrieval.bm25_index import get_bm25_indexer, BM25Indexer
+from src.retrieval.reranker import get_reranker, Reranker
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +110,7 @@ class HybridRetriever:
         top_k: Optional[int] = None,
         bm25_indexer: Optional[BM25Indexer] = None,
         hybrid_enabled: Optional[bool] = None,
+        reranker: Optional[Reranker] = None,
     ):
         """
         Initialize hybrid retriever.
@@ -119,18 +122,23 @@ class HybridRetriever:
             top_k: Number of results to retrieve (from config if None)
             bm25_indexer: BM25 indexer instance (creates default if None)
             hybrid_enabled: Whether to enable BM25+RRF fusion (default from config)
+            reranker: Optional reranker instance (creates default if None)
         """
         self.client = client or QdrantClient(
-            host=config.qdrant.host,
-            port=config.qdrant.port,
+            host=get_config().qdrant.host,
+            port=get_config().qdrant.port,
         )
         self.embeddings = embeddings or get_embeddings()
-        self.collection_name = collection_name or config.qdrant.collection
-        self.top_k = top_k or config.retrieval.top_k_dense
+        self.collection_name = collection_name or get_config().qdrant.collection
+        self.top_k = top_k or get_config().retrieval.top_k_dense
 
         # BM25 indexer (lazy init)
         self._bm25_indexer = bm25_indexer
-        self.hybrid_enabled = hybrid_enabled if hybrid_enabled is not None else config.retrieval.hybrid_enabled
+        self.hybrid_enabled = hybrid_enabled if hybrid_enabled is not None else get_config().retrieval.hybrid_enabled
+
+        # Reranker (lazy init)
+        self._reranker = reranker
+        self.rerank_enabled = get_config().retrieval.rerank_enabled
 
     @property
     def bm25_indexer(self) -> Optional[BM25Indexer]:
@@ -143,6 +151,18 @@ class HybridRetriever:
                 logger.warning(f"Failed to initialize BM25 indexer: {e}")
                 self._bm25_indexer = None
         return self._bm25_indexer
+
+    @property
+    def reranker(self) -> Optional[Reranker]:
+        """Lazy-initialize reranker."""
+        if self._reranker is None and self.rerank_enabled:
+            try:
+                self._reranker = get_reranker()
+                logger.info("Reranker initialized")
+            except Exception as e:
+                logger.warning(f"Failed to initialize reranker: {e}")
+                self._reranker = None
+        return self._reranker
 
     def retrieve(
         self,
@@ -166,8 +186,9 @@ class HybridRetriever:
             RetrievalResult with chunks and metadata
         """
         k = top_k or self.top_k
-        top_k_bm25 = config.retrieval.top_k_bm25
-        top_k_final = config.retrieval.top_k_final
+        cfg = get_config()
+        top_k_bm25 = cfg.retrieval.top_k_bm25
+        top_k_final = cfg.retrieval.top_k_final
 
         # Dense retrieval
         query_vector = self.embeddings.embed_query(query)
@@ -258,6 +279,12 @@ class HybridRetriever:
                 if dense_match:
                     chunk["text"] = dense_match.get("text", "")
 
+        # Optional reranking (after fusion, before returning)
+        reranker = self.reranker
+        if reranker:
+            fused_chunks = reranker.rerank(query, fused_chunks, top_k=top_k_final)
+            strategy = f"{strategy}_reranked"
+
         logger.info(f"Retrieved {len(fused_chunks)} chunks ({strategy}) for query: {query[:50]}...")
 
         return RetrievalResult(
@@ -290,8 +317,9 @@ class HybridRetriever:
             chunk_types = ["child", "abstract"]
 
         k = top_k or self.top_k
-        top_k_bm25 = config.retrieval.top_k_bm25
-        top_k_final = config.retrieval.top_k_final
+        cfg = get_config()
+        top_k_bm25 = cfg.retrieval.top_k_bm25
+        top_k_final = cfg.retrieval.top_k_final
 
         query_vector = self.embeddings.embed_query(query)
 
@@ -377,6 +405,12 @@ class HybridRetriever:
                 dense_match = next((c for c in dense_chunks if c.get("chunk_id") == chunk["chunk_id"]), None)
                 if dense_match:
                     chunk["text"] = dense_match.get("text", "")
+
+        # Optional reranking (after fusion, before returning)
+        reranker = self.reranker
+        if reranker:
+            fused_chunks = reranker.rerank(query, fused_chunks, top_k=top_k_final)
+            strategy = f"{strategy}_reranked"
 
         logger.info(f"Retrieved {len(fused_chunks)} chunks ({strategy}) for query: {query[:50]}...")
 

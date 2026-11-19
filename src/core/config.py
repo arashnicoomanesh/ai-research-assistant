@@ -46,6 +46,8 @@ class RetrievalConfig:
     top_k_final: int = int(os.getenv("TOP_K_FINAL", "5"))
     rerank_top_k: int = int(os.getenv("RERANK_TOP_K", "20"))
     hybrid_enabled: bool = os.getenv("HYBRID_ENABLED", "true").lower() == "true"
+    rerank_enabled: bool = os.getenv("RERANK_ENABLED", "false").lower() == "true"
+    rerank_model: str = os.getenv("RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
 
 
 @dataclass
@@ -132,3 +134,8 @@ class Config:
 
 # Global config instance
 config = Config()
+
+
+def get_config() -> Config:
+    """Get the global config instance (allows for reloading in tests)."""
+    return config

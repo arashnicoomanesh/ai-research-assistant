@@ -107,6 +107,7 @@ This repository is a **RAG laboratory** — a complete, hackable system where se
 | Query rewriting | ⚠️ Partial | Sometimes over-generalizes entities |
 | Adaptive routing | ✓ Working | `no_retrieval` / `baseline` / `single_shot` / `multi_step` / `crag_raptor` / `graph_rag` |
 | Hybrid retrieval (dense + BM25 + RRF) | ✓ Working | BM25 index persisted; RRF fusion (k=60) |
+| Cross-encoder rerank | 🧪 Optional, OFF by default | `RERANK_ENABLED=false` default; requires sentence-transformers; not for weak CPU |
 | Dense retrieval (`query_points`) | ✓ Working | Modern Qdrant API |
 | Parent expansion | ✓ Working | Lookup by payload `chunk_id` |
 | Answer generation + citations | ✓ Working | Grounded answers returned |
