@@ -2,7 +2,7 @@
 
 # AI Research Assistant
 
-A local-first, framework-free Advanced RAG lab that implements Adaptive routing, CRAG, multi-step retrieval, RAPTOR, semantic cache, and Stage-A GraphRAG in one coherent CPU-runnable system.
+A local-first, framework-free RAG laboratory that implements Adaptive routing, CRAG, multi-step retrieval, RAPTOR-inspired summaries, semantic cache, and Stage-A GraphRAG in one coherent CPU-runnable system.
 
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -18,14 +18,14 @@ A local-first, framework-free Advanced RAG lab that implements Adaptive routing,
 ## Why this repo is different
 
 - **Explicit implementations** — Core RAG logic written from scratch; no LangChain/LlamaIndex in the critical path
-- **Multi-strategy Advanced RAG in one local system** — Adaptive routing, CRAG, multi-step, RAPTOR, GraphRAG, semantic cache
+- **Multi-strategy RAG in one local system** — Adaptive routing, CRAG, multi-step, RAPTOR-inspired, GraphRAG (Stage A), semantic cache
 - **CPU-runnable defaults** — 3B LLM + embeddings run on 8 GB RAM; `CPU_SAFE_MODE` keeps latency acceptable
 - **Inspectable routing decisions** — Every answer shows the chosen strategy (`graph_rag_relational`, `raptor_survey`, `crag_refine`, `cached_*`)
 - **Honest status + experimental GraphRAG Stage A** — Capability map below is the target scope; status audit is separate
 
 ## Positioning
 
-This repository is an **Advanced RAG laboratory** — a complete, hackable system where every Advanced RAG technique is implemented explicitly and runs locally. It is not a wrapper around a framework; it is the framework, laid bare for study and extension. Use it to learn RAG internals, answer questions over AI research papers, or prototype new retrieval strategies without cloud APIs or hidden abstractions.
+This repository is a **RAG laboratory** — a complete, hackable system where several RAG techniques are implemented explicitly and run locally. It is not a wrapper around a framework; it is the framework, laid bare for study and extension. Use it to learn RAG internals, answer questions over AI research papers, or prototype new retrieval strategies without cloud APIs or hidden abstractions.
 
 ---
 
@@ -48,17 +48,17 @@ This repository is an **Advanced RAG laboratory** — a complete, hackable syste
 - Dense vector retrieval (modern Qdrant `query_points` API)
 - Parent expansion (child→parent lookup via payload `chunk_id`)
 - Cited answer generation (grounded, per-source citations)
-- Semantic cache (exact-repeat HIT → instant answer)
+- Semantic cache (exact-repeat HIT → instant answer; similarity-based, no TTL)
 - CPU-Safe Mode (default ON; defers expensive ops)
 
 ### C. Advanced RAG Modules
 - **Adaptive RAG** — Route per query type to the right strategy
 - **Corrective RAG (CRAG)** — Iterative retrieval with rewrite/merge when quality low
 - **Multi-step retrieval** — Decompose → sub-questions → per-sub retrieval → synthesize
-- **RAPTOR hierarchical summaries** — Build/merge summary layers from child chunks
+- **RAPTOR-inspired hierarchical summaries** — Build/merge summary layers from child chunks (limited hierarchy; not full RAPTOR clustering tree)
 - **Document grading** — LLM-based relevance filter (OFF by default in CPU mode)
 - **Faithfulness self-check** — Answer-vs-sources validation (OFF by default in CPU mode)
-- **Semantic cache / cost optimization** — Dedupe identical queries; configurable TTL
+- **Semantic cache / cost optimization** — Dedupe identical/similar queries; max-entries eviction (no TTL)
 
 ### D. GraphRAG Stack
 - Entity/relation extraction (LLM with 3-stage CPU fallback)
@@ -115,10 +115,10 @@ This repository is an **Advanced RAG laboratory** — a complete, hackable syste
 | Adaptive RAG | ✓ Implemented | Router chooses strategy by query type |
 | Corrective RAG (CRAG) | ✓ Implemented | Rewrite/merge path used (lightweight in CPU mode) |
 | Multi-Step Retrieval | ✓ Implemented | Decomposition + per-sub retrieval code path |
-| RAPTOR | ✓ Working | Builder + retriever paths verified |
+| RAPTOR-inspired | ✓ Working | Builder + retriever paths verified; limited hierarchy |
 | Document grading | 🧪 Implemented, OFF by default | LLM grader disabled in CPU-Safe Mode |
 | Faithfulness self-check | 🧪 Implemented, OFF by default | Disabled in CPU-Safe Mode |
-| Semantic Caching | ✓ Implemented | HIT path verified |
+| Semantic Caching | ✓ Implemented | HIT path verified; similarity-based, max-entries eviction |
 
 ### D. GraphRAG Stack
 | Capability | Status | Notes |
@@ -143,7 +143,7 @@ This repository is an **Advanced RAG laboratory** — a complete, hackable syste
 
 ### What works well now
 - End-to-end QA with citations on local hardware (Ollama + Qdrant)
-- RAPTOR hierarchical summaries built and retrieved correctly
+- RAPTOR-inspired hierarchical summaries built and retrieved correctly
 - GraphRAG answers technique/relational queries (e.g., "What techniques does X introduce?")
 - CPU-Safe defaults keep the system responsive on 3B models
 - Semantic cache makes repeat queries instant
@@ -170,12 +170,12 @@ This repository is an **Advanced RAG laboratory** — a complete, hackable syste
 
 **Flow:** extract → graph store → entity linking → 1-hop neighborhood traversal → supporting chunks → grounded answer
 
-**Stage A status (current):** Implemented end-to-end
+**Stage A status (current):** Implemented end-to-end; **experimental, opt-in via `EXPERIMENTAL_ROUTING=true`** (Reliable Mode default forces `single_shot` for non-relational queries)
 - `scripts/build_graph.py` builds the graph (LLM extraction with 3-stage CPU fallback)
 - Entity IDs normalized; aliases merged (e.g., "Self-RAG"/"SELF-RAG" → `self-rag`)
 - Graph stored as NetworkX JSON (`data/graph/graph.json`, local runtime artifact)
-- Adaptive router selects `graph_rag` for technique/relational queries
-- Retrieval links query entities, expands 1-hop neighborhood, fetches supporting Qdrt chunks
+- Adaptive router selects `graph_rag` for technique/relational queries when experimental routing is enabled
+- Retrieval links query entities, expands 1-hop neighborhood, fetches supporting Qdrant chunks
 
 **Stage B (planned):** Community detection + global summary generation (Microsoft-style GraphRAG)
 
@@ -191,7 +191,7 @@ python scripts/build_graph.py --dedupe
 python scripts/build_graph.py --stats
 ```
 
-> **Notes:** GraphRAG is experimental. Entity linking is heuristic and can be noisy; extraction quality improves with larger models. Use `--limit` and abstracts-first on CPU. `graph.json` is not committed to git.
+> **Notes:** GraphRAG is experimental. Entity linking is heuristic and can be noisy; extraction quality improves with larger models. Use `--limit` and abstracts-first on CPU. `graph.json` is not committed to git (ignored via `data/graph/*.json`).
 
 ---
 
@@ -202,11 +202,14 @@ The adaptive router selects a strategy per query. Each answer header shows the s
 | Strategy | Description | Typical Trigger |
 |---|---|---|
 | `no_retrieval` | Answer from model knowledge without retrieval. | Simple factual / definitional |
-| `single_shot` | CRAG path — single retrieval + optional corrective step. | Standard fact-seeking |
-| `multi_step` | Decompose → sub-questions → per-sub retrieval → synthesize. | Complex multi-part |
-| `crag_raptor` | RAPTOR hierarchical retrieval via summary layers. | Survey / overview / deep-dive |
-| `graph_rag` | Entity linking → 1-hop traversal → grounded answer. | Technique list / relational |
+| `baseline` | Dense retrieve top-k + generate. No CRAG rewrite loop. | Forced via `FORCE_STRATEGY=baseline` |
+| `single_shot` | CRAG path — single retrieval + optional corrective step. Default in Reliable Mode. | Standard fact-seeking |
+| `multi_step` | Decompose → sub-questions → per-sub retrieval → synthesize. Requires `EXPERIMENTAL_ROUTING=true`. | Complex multi-part |
+| `crag_raptor` | RAPTOR-inspired hierarchical retrieval via summary layers. Requires `EXPERIMENTAL_ROUTING=true`. | Survey / overview / deep-dive |
+| `graph_rag` | Entity linking → 1-hop traversal → grounded answer. Requires `EXPERIMENTAL_ROUTING=true`. | Technique list / relational |
 | `cached_*` | Served from semantic cache (instant). | Exact repeat query |
+
+**Reliable Mode (default: `RELIABLE_MODE=true`, `EXPERIMENTAL_ROUTING=false`):** Forces `single_shot` (CRAG) for all queries except `no_retrieval` and `baseline`. Experimental strategies (`multi_step`, `crag_raptor`, `graph_rag`) only activate when `EXPERIMENTAL_ROUTING=true`. Use `FORCE_STRATEGY=baseline` to explicitly select the vanilla retrieve+generate path.
 
 ---
 
@@ -217,30 +220,30 @@ The router picks the strategy automatically. Run these and watch the strategy la
 **Curated demo queries:**
 
 ```bash
-# Definition-style → tends to route to single_shot / CRAG path
+# Definition-style → routes to single_shot / CRAG path (Reliable Mode default)
 python src/main.py "What is Self-RAG?"
 
-# Technique extraction → tends to route to graph_rag
-python src/main.py "What techniques does Self-RAG introduce?"
+# Technique extraction → routes to graph_rag (requires EXPERIMENTAL_ROUTING=true)
+EXPERIMENTAL_ROUTING=true python src/main.py "What techniques does Self-RAG introduce?"
 
-# Survey / overview → tends to route to crag_raptor (RAPTOR path)
-python src/main.py "Give me an overview of advanced RAG methods in these papers"
+# Survey / overview → routes to crag_raptor (RAPTOR path, requires EXPERIMENTAL_ROUTING=true)
+EXPERIMENTAL_ROUTING=true python src/main.py "Give me an overview of advanced RAG methods in these papers"
 
 # Cache demo (second run should be fast)
 python src/main.py "What is Self-RAG?"
 
 # Optional relational demo (experimental — graph may be noisy)
-python src/main.py "How is Self-RAG related to CRAG?"
+EXPERIMENTAL_ROUTING=true python src/main.py "How is Self-RAG related to CRAG?"
 ```
 
-**Expected routing tendencies** (not guarantees — router uses heuristics + LLM):
+**Expected routing tendencies** (not guarantees — router uses heuristics + LLM; Reliable Mode forces single_shot unless EXPERIMENTAL_ROUTING=true):
 
 | Query pattern | Typical strategy | What you see |
 |---|---|---|
 | "What is X?" | `single_shot` / `cached_*` | Definition + citations |
-| "What techniques does X introduce?" | `graph_rag` | Techniques from graph edges |
-| "How is X related to Y?" | `graph_rag` | Path/edges between entities |
-| "Overview of Z" / "Survey of …" | `crag_raptor` | Summary from RAPTOR layers |
+| "What techniques does X introduce?" | `graph_rag` (if experimental) | Techniques from graph edges |
+| "How is X related to Y?" | `graph_rag` (if experimental) | Path/edges between entities |
+| "Overview of Z" / "Survey of …" | `crag_raptor` (if experimental) | Summary from RAPTOR layers |
 | Repeat identical query | `cached_*` | Near-instant cached answer |
 
 **Timing notes (CPU, 3B model):**
@@ -248,7 +251,7 @@ python src/main.py "How is Self-RAG related to CRAG?"
 - Cache hits: <2 seconds
 - Strategy name appears in answer header (e.g., `graph_rag_relational`, `raptor_survey`, `crag_refine`)
 
-> Note: forced `--strategy` CLI flag is not the main interface yet; auto-routing + env flags (`CPU_SAFE_MODE`) control behavior.
+> Note: forced `--strategy` CLI flag is not the main interface yet; auto-routing + env flags (`CPU_SAFE_MODE`, `RELIABLE_MODE`, `EXPERIMENTAL_ROUTING`) control behavior.
 
 ---
 
@@ -457,11 +460,12 @@ ai-research-assistant/
 | **Model sizes** | Default LLM `qwen2.5-coder:3b` and embeddings `nomic-embed-text:v1.5` work on CPU but are slower. Larger models or GPU improve quality/speed. |
 | **Memory** | Multiple model instances consume RAM. Config tuned for 8 GB+. |
 | **Qdrant** | Vector search on CPU is functional but slower than GPU-accelerated. |
-| **RAPTOR** | Building summary layers needs multiple LLM calls. Use `--limit` for large collections. |
+| **RAPTOR** | Building summary layers needs multiple LLM calls. Use `--limit` for large collections. Limited hierarchy (section-level summaries); not full RAPTOR clustering tree. |
 | **GraphRAG extraction** | Entity/relation extraction ~1–2 min/chunk on 3B CPU. Prefer `--limit` and abstracts-first. |
 | **Multi-step** | Complex questions generate multiple sub-questions; latency scales. |
-| **Cache** | Semantic cache speeds repeats; expires on re-ingestion. |
+| **Cache** | Semantic cache speeds repeats; max-entries eviction (oldest removed); no TTL expiration. |
 | **CPU_SAFE_MODE** | Default ON: disables grader, self-check, RAPTOR self-check for latency. |
+| **RELIABLE_MODE** | Default ON: forces `single_shot` (CRAG) unless `EXPERIMENTAL_ROUTING=true`. |
 | **First-run latency** | First answers 1–4 min; repeats <2 s via cache. |
 
 ---

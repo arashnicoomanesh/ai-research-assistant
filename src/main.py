@@ -8,6 +8,7 @@ Orchestrates the full pipeline with GraphRAG, Corrective RAG, and RAPTOR-enhance
 3. Route the query (adaptive router with GraphRAG + RAPTOR support)
 4. If retrieval needed:
    - no_retrieval: Answer from model knowledge
+   - baseline: Dense retrieve + generate (no corrective loop)
    - single_shot: Corrective RAG (CRAG)
    - multi_step: Decompose + retrieve per sub-question
    - crag_raptor: RAPTOR-enhanced hierarchical retrieval
@@ -18,6 +19,7 @@ Orchestrates the full pipeline with GraphRAG, Corrective RAG, and RAPTOR-enhance
 """
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -194,6 +196,27 @@ class ResearchAssistant:
         stats = self.cache.stats()
         logger.info("Cache: %d entries, %d total hits", stats["entries"], stats["total_hits"])
 
+    @staticmethod
+    def _to_dict(chunk: Any) -> Dict[str, Any]:
+        """Convert chunk to dict (handles both dict and dataclass)."""
+        if isinstance(chunk, dict):
+            return chunk
+        # Assume dataclass with attributes (GradedChunk)
+        return {
+            "chunk_id": getattr(chunk, "chunk_id", None),
+            "paper_id": getattr(chunk, "paper_id", ""),
+            "title": getattr(chunk, "title", ""),
+            "section": getattr(chunk, "section", ""),
+            "chunk_type": getattr(chunk, "chunk_type", ""),
+            "text": getattr(chunk, "text", ""),
+            "parent_id": getattr(chunk, "parent_id", None),
+            "chunk_index": getattr(chunk, "chunk_index", 0),
+            "token_count": getattr(chunk, "token_count", 0),
+            "relevance_score": getattr(chunk, "relevance_score", 0),
+            "relevance_label": getattr(chunk, "relevance_label", ""),
+            "reasoning": getattr(chunk, "reasoning", ""),
+        }
+
     def _graph_evidence_to_chunks(self, evidence: GraphEvidence) -> List[Dict[str, Any]]:
         """
         Convert GraphEvidence to chunk format for answer generator.
@@ -329,9 +352,65 @@ class ResearchAssistant:
                     routing.strategy, routing.confidence, routing.query_type, routing.reasoning,
                     routing.use_raptor)
 
+        # Force strategy override via environment variable (for testing/baseline)
+        force_strategy = os.getenv("FORCE_STRATEGY")
+        if force_strategy:
+            valid_strategies = ("no_retrieval", "baseline", "single_shot", "multi_step", "crag_raptor", "graph_rag")
+            if force_strategy in valid_strategies:
+                logger.info("FORCE_STRATEGY: overriding strategy from %s to %s", routing.strategy, force_strategy)
+                routing = RoutingDecision(
+                    strategy=force_strategy,
+                    confidence=1.0,
+                    reasoning=f"Forced via FORCE_STRATEGY={force_strategy}",
+                    query_type=routing.query_type,
+                    use_raptor=force_strategy in ("crag_raptor",),
+                    use_graph=force_strategy in ("graph_rag",),
+                )
+            else:
+                logger.warning("FORCE_STRATEGY=%s is not a valid strategy, ignoring", force_strategy)
+
         # Step 4: Handle based on strategy
         if routing.strategy == "no_retrieval":
             answer = self.generator.generate_no_retrieval(query)
+            # Store in cache
+            self.cache.put(query, answer.answer, answer.sources, answer.strategy)
+            return answer
+
+        elif routing.strategy == "baseline":
+            logger.info("Baseline strategy engaged - dense retrieve + generate (no corrective loop)")
+            # Simple dense retrieval without CRAG rewrite loop
+            retrieval_result = self.retriever.retrieve_multi_type(
+                query=search_query,
+                chunk_types=["child", "abstract"],
+            )
+
+            if not retrieval_result.chunks:
+                answer = GeneratedAnswer(
+                    answer="No relevant information found using baseline retrieval.",
+                    sources=[],
+                    query=query,
+                    strategy="baseline_no_results",
+                    faithful=True,
+                    confidence=0.0,
+                    self_check_reasoning="Baseline retrieval returned no results"
+                )
+                self.cache.put(query, answer.answer, answer.sources, answer.strategy)
+                return answer
+
+            # Grade chunks for relevance (optional, but keeps quality filters)
+            graded_chunks = self.grader.grade(query, retrieval_result.chunks)
+            graded_chunks = [self._to_dict(c) for c in graded_chunks] if hasattr(self, '_to_dict') else graded_chunks
+
+            # Expand to parents (inherits child scores from Q2.3) and apply sludge filter (Q2.1)
+            # The generator will handle parent expansion and sludge filter via its own logic
+            answer = self.generator.generate(
+                query=query,
+                graded_chunks=graded_chunks,
+                retriever=self.retriever,
+            )
+
+            answer.strategy = "baseline"
+
             # Store in cache
             self.cache.put(query, answer.answer, answer.sources, answer.strategy)
             return answer
@@ -380,8 +459,27 @@ class ResearchAssistant:
             answer.strategy = f"multi_step_{len(ms_result.sub_questions)}sub_{ms_result.total_retrievals}retrievals"
 
             # Include multi-step metadata
-            if ms_result.multi_step_metadata:
-                answer.multi_step_metadata = ms_result.multi_step_metadata
+            ms_meta = getattr(ms_result, "multi_step_metadata", None)
+            if ms_meta:
+                answer.multi_step_metadata = ms_meta
+            else:
+                # Build fallback metadata from result attributes
+                answer.multi_step_metadata = {
+                    "sub_questions": [
+                        {
+                            "index": sq.index,
+                            "question": sq.question,
+                            "retrieval_success": sq.retrieval_success,
+                            "relevance_score": sq.relevance_score,
+                        }
+                        for sq in ms_result.sub_questions
+                    ],
+                    "follow_up_question": ms_result.follow_up_question,
+                    "gap_identified": ms_result.gap_identified,
+                    "total_retrievals": ms_result.total_retrievals,
+                    "num_chunks": len(ms_result.all_chunks),
+                    "process_log": list(ms_result.process_log),
+                }
 
             # Store in cache
             self.cache.put(query, answer.answer, answer.sources, answer.strategy)
@@ -518,7 +616,54 @@ class ResearchAssistant:
 
                 # Fallback if graph evidence is empty
                 if not graph_evidence.entities and not graph_evidence.relations:
-                    logger.warning("GraphRAG returned empty evidence, falling back to single_shot")
+                    logger.warning("GraphRAG returned empty evidence, falling back to single_shot (CRAG)")
+                    # Actually run the corrective retriever (same as single_shot path)
+                    logger.info("Starting Corrective RAG retrieval as fallback...")
+                    corrective_result = self.corrective_retriever.retrieve(
+                        query=search_query,
+                        chunk_types=["child", "abstract"],
+                    )
+
+                    # Log corrective retrieval details
+                    eval_info = corrective_result.evaluation
+                    if eval_info:
+                        logger.info("CRAG Evaluation: %s (confidence=%.2f, chunks=%d, avg_rel=%.2f) - %s",
+                                    eval_info.evaluation, eval_info.confidence, eval_info.num_chunks,
+                                    eval_info.avg_relevance, eval_info.reasoning)
+                    logger.info("CRAG Correction: %s (total retrievals: %d)",
+                                corrective_result.correction_applied, corrective_result.total_retrievals)
+                    if corrective_result.rewrite_used:
+                        logger.info("CRAG Rewrite used: '%s'", corrective_result.rewrite_used)
+
+                    final_chunks = corrective_result.chunks
+
+                    if not final_chunks:
+                        answer = GeneratedAnswer(
+                            answer="No relevant information found after corrective retrieval.",
+                            sources=[],
+                            query=query,
+                            strategy="graph_rag_fallback_crag_no_results",
+                            faithful=True,
+                            confidence=0.0,
+                            self_check_reasoning=f"GraphRAG fallback CRAG evaluation: {eval_info.evaluation if eval_info else 'unknown'}"
+                        )
+                        self.cache.put(query, answer.answer, answer.sources, answer.strategy)
+                        return answer
+
+                    # Generate answer with citations + self-check
+                    answer = self.generator.generate(
+                        query=query,
+                        graded_chunks=final_chunks,
+                        retriever=self.retriever,
+                    )
+
+                    # Add fallback strategy label
+                    answer.strategy = f"graph_rag_fallback_crag_{corrective_result.correction_applied}"
+
+                    # Store in cache
+                    self.cache.put(query, answer.answer, answer.sources, answer.strategy)
+
+                    return answer
                 else:
                     # Convert GraphEvidence to chunks for generator
                     final_chunks = self._graph_evidence_to_chunks(graph_evidence)
@@ -617,6 +762,8 @@ class ResearchAssistant:
             "cached_raptor_survey": "⚡🗺️",
             "cached_raptor_detail": "⚡🗺️📄",
             "cached_graph_rag_relational": "⚡🕸️",
+            "baseline": "📄",
+            "baseline_no_results": "❌",
             "no_results": "❌",
             "no_relevant": "⚠️",
             "multi_step_no_results": "❌",

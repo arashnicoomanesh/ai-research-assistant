@@ -19,7 +19,7 @@ from src.core.llm import OllamaLLM, get_llm
 logger = logging.getLogger(__name__)
 
 
-Strategy = Literal["no_retrieval", "single_shot", "multi_step", "crag_raptor", "graph_rag"]
+Strategy = Literal["no_retrieval", "baseline", "single_shot", "multi_step", "crag_raptor", "graph_rag"]
 
 
 @dataclass
@@ -41,7 +41,7 @@ class AdaptiveRouter:
     Supports five strategies for different query complexities.
     """
 
-    # System prompt for classification
+# System prompt for classification
     ROUTER_SYSTEM_PROMPT = """You are a query router for a research paper QA system.
 Classify the user's query into one of these strategies:
 
@@ -49,7 +49,12 @@ Classify the user's query into one of these strategies:
    Examples: "What is a neural network?", "Define overfitting", "Explain backpropagation",
              "What does RAG stand for?"
 
-2. "graph_rag" - Query asks about relationships between entities, methods, or concepts,
+2. "baseline" - Simple retrieve-and-generate without corrective loops.
+   Use for straightforward fact-seeking queries where a single dense retrieval is sufficient.
+   Examples: "What method did the Attention Is All You Need paper use?",
+             "What are the results of the BERT paper?"
+
+3. "graph_rag" - Query asks about relationships between entities, methods, or concepts,
    or asks what techniques/methods a paper/introduction/proposal introduces.
    Uses knowledge graph for entity linking and neighborhood traversal.
    Examples: "How is Self-RAG related to CRAG?",
@@ -59,25 +64,24 @@ Classify the user's query into one of these strategies:
              "Which models improve upon Transformer?",
              "What addresses poor retrieval quality?"
 
-3. "single_shot" - Query requires retrieving specific information from papers, answerable in one retrieval step.
-   Examples: "What method did the Attention Is All You Need paper use?",
-             "What are the results of the BERT paper?",
-             "Summarize the contributions of the GPT-3 paper."
+4. "single_shot" - Standard retrieval + generation with corrective RAG (CRAG) for quality.
+   Use when retrieval quality may need improvement via rewrite/merge.
+   Examples: "Summarize the contributions of the GPT-3 paper."
 
-4. "crag_raptor" - Query benefits from hierarchical summary retrieval using RAPTOR.
-    Provides high-level overview of field/trends, then detailed evidence.
-    Examples: "Overview of transformer architectures in recent papers",
-              "Trends in attention mechanisms across 2020-2023",
-              "Summarize the field of diffusion models",
-              "Evolution of RAG techniques in recent years"
+5. "crag_raptor" - Query benefits from hierarchical summary retrieval using RAPTOR.
+   Provides high-level overview of field/trends, then detailed evidence.
+   Examples: "Overview of transformer architectures in recent papers",
+             "Trends in attention mechanisms across 2020-2023",
+             "Summarize the field of diffusion models",
+             "Evolution of RAG techniques in recent years"
 
-5. "multi_step" - Complex queries requiring multiple retrieval steps.
+6. "multi_step" - Complex queries requiring multiple retrieval steps.
    ...
 ```
 
 Wait, I need to be careful about the numbering. Let me just add a higher-priority note for graph_rag rather than renumbering everything.
 {
-  "strategy": "no_retrieval|single_shot|multi_step|crag_raptor|graph_rag",
+  "strategy": "no_retrieval|baseline|single_shot|multi_step|crag_raptor|graph_rag",
   "confidence": 0.0-1.0,
   "reasoning": "Brief explanation",
   "query_type": "factual|comparison|specific_paper|methodology|survey|general|relational",
