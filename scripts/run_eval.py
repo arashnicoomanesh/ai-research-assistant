@@ -100,6 +100,7 @@ def run_single_question(
         "cache_hit": False,
         "retrieval_success": False,
         "citation_present": False,
+        "has_citation": False,
         "crag_metadata": None,
         "raptor_metadata": None,
     }
@@ -114,7 +115,9 @@ def run_single_question(
         result["faithful"] = True
         result["latency"] = 0.01  # Cache lookup is fast
         # Still record citation info
-        result["citation_present"] = has_citation(result["answer"], result["sources"])
+        cite = has_citation(result["answer"], result["sources"])
+        result["citation_present"] = cite
+        result["has_citation"] = cite
         return result
 
     # Step 2: Run through pipeline
@@ -131,11 +134,14 @@ def run_single_question(
         result["sources"] = answer.sources
         result["strategy"] = answer.strategy
         result["faithful"] = answer.faithful
-        result["citation_present"] = has_citation(answer.answer, answer.sources)
+        cite = has_citation(answer.answer, answer.sources)
+        result["citation_present"] = cite
+        result["has_citation"] = cite
 
         # Record CRAG/MP/RAptor metadata
-        if answer.multi_step_metadata:
-            result["raptor_metadata"] = answer.multi_step_metadata
+        ms_meta = getattr(answer, "multi_step_metadata", None)
+        if ms_meta:
+            result["raptor_metadata"] = ms_meta
         if "crag_" in answer.strategy:
             result["crag_metadata"] = {
                 "correction_applied": answer.strategy.replace("crag_", ""),

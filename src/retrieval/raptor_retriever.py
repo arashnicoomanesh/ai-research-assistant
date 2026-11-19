@@ -255,6 +255,7 @@ class RaptorRetriever:
                     seen_ids.add(chunk_id)
                     combined.append({
                         **{k: v for k, v in node.__dict__.items() if k != "_state"},
+                        "text": node.summary,  # Map summary to text field for generator
                         "_raptor_node": True,
                         "summary_level": node.level,
                     })
@@ -286,6 +287,7 @@ class RaptorRetriever:
                     seen_ids.add(chunk_id)
                     combined.append({
                         **{k: v for k, v in node.__dict__.items() if k != "_state"},
+                        "text": node.summary,  # Map summary to text field for generator
                         "_raptor_node": True,
                         "summary_level": node.level,
                     })

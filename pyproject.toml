@@ -71,7 +71,7 @@ ignore = [
     "E501",  # line too long (handled by formatter)
 ]
 per-file-ignores = {
-    "scripts/*.py": ["E501"],
+    "scripts/*.py" = ["E501"],
 }
 
 [tool.ruff.format]

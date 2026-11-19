@@ -12,6 +12,7 @@ from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from src.core.llm import OllamaLLM, get_llm
 from src.core.config import config
+from src.retrieval.sludge_filter import filter_sludge
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +156,9 @@ Is the answer faithful to the context? Return JSON only."""
         context_chunks = graded_chunks
         if self.expand_to_parents and retriever:
             context_chunks = retriever.expand_to_parents(graded_chunks)
+
+        # Filter out sludge (table dumps, OCR noise, numeric blocks)
+        context_chunks = filter_sludge(context_chunks)
 
         # Limit context size
         context_chunks = self._limit_context(context_chunks)
@@ -324,7 +328,11 @@ Is the answer faithful to the context? Return JSON only."""
         return True, 1.0, "Self-check error, assumed faithful"
 
     def _limit_context(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Limit context to max chunks and approximate token budget."""
+        """Limit context to max chunks and approximate token budget.
+
+        Enforces a hard cap on chunk count (max_context_chunks) first, then applies
+        token budget within that cap. Chunks are sorted by relevance score descending.
+        """
         # Sort by relevance score if available
         chunks = sorted(
             chunks,
@@ -332,17 +340,25 @@ Is the answer faithful to the context? Return JSON only."""
             reverse=True
         )
 
+        # HARD CAP: enforce max chunk count first
+        # This is the primary cap - token budget is secondary
+        if len(chunks) > self.max_context_chunks:
+            chunks = chunks[:self.max_context_chunks]
+
+        # Then apply token budget within the chunk cap
         limited = []
         total_tokens = 0
 
         for chunk in chunks:
-            if len(limited) >= self.max_context_chunks:
-                break
             chunk_tokens = chunk.get("token_count", len(chunk.get("text", "").split()) * 1.3)
             if total_tokens + chunk_tokens > self.max_context_tokens:
                 break
             limited.append(chunk)
             total_tokens += chunk_tokens
+
+        # Log final context size
+        logger.info(f"Context limited to {len(limited)} chunks "
+                    f"(cap={self.max_context_chunks}, tokens={total_tokens:.0f}/{self.max_context_tokens})")
 
         return limited
 

@@ -78,8 +78,8 @@ class IngestionPipeline:
             logger.warning("No PDF files found in papers directory")
             return {"processed": 0, "skipped": 0, "failed": 0, "total_chunks": 0}
 
-        # 2. Clean up records for deleted files
-        deleted_count = self.record_mgr.cleanup_deleted_files(pdf_files)
+        # 2. Clean up records for deleted files (also deletes vectors from Qdrant)
+        deleted_count = self.record_mgr.cleanup_deleted_files(pdf_files, indexer=self.indexer)
         if deleted_count:
             logger.info(f"Marked {deleted_count} records as deleted (files removed)")
 
@@ -117,8 +117,12 @@ class IngestionPipeline:
         file_hash = self.parser.compute_file_hash(pdf_file)
         file_size = pdf_file.stat().st_size
 
-        # Check if re-indexing needed
-        if not self.force_reindex and not self.record_mgr.needs_reindex(paper_id, file_hash):
+        # Check if re-indexing needed and get existing record status
+        existing_record = self.record_mgr.get_record(paper_id)
+        was_indexed = existing_record is not None and existing_record.status == "indexed"
+        needs_reindex = self.force_reindex or self.record_mgr.needs_reindex(paper_id, file_hash)
+
+        if not needs_reindex:
             logger.info(f"  -> Skipping (unchanged): {paper_id}")
             return {
                 "paper_id": paper_id,
@@ -128,9 +132,14 @@ class IngestionPipeline:
                 "parser": "none",
             }
 
-        # Create/update record
+        # Create/update record with pending status
         record = create_record(paper_id, pdf_file, file_hash, file_size)
         self.record_mgr.upsert_record(record)
+
+        # Delete old chunks BEFORE indexing if this is a re-index of a previously indexed paper
+        if was_indexed:
+            logger.info(f"  -> Removing old chunks for re-index...")
+            self.indexer.delete_paper_chunks(paper_id)
 
         try:
             # Step 1: Parse PDF
@@ -148,17 +157,25 @@ class IngestionPipeline:
             abstract_count = sum(1 for c in chunks if c.chunk_type == "abstract")
             logger.info(f"     Chunks: {len(chunks)} total ({child_count} child, {parent_count} parent, {abstract_count} abstract)")
 
-            # Step 3: Delete old chunks (if re-indexing)
-            if self.record_mgr.get_record(paper_id) and self.record_mgr.get_record(paper_id).status == "indexed":
-                logger.info(f"  -> Removing old chunks...")
-                self.indexer.delete_paper_chunks(paper_id)
-
-            # Step 4: Index
+            # Step 3: Index
             logger.info(f"  -> Indexing to Qdrant...")
             index_stats = self.indexer.index_chunks(chunks)
             logger.info(f"     Upserted: {index_stats.upserted}, Errors: {index_stats.errors}")
 
-            # Step 5: Update record
+            # Step 4: Check for batch errors - do not mark success if any batch failed
+            if index_stats.errors > 0:
+                error_msg = f"Batch upsert failed for {index_stats.errors} chunks"
+                logger.error(f"  -> FAILED: {error_msg}")
+                self.record_mgr.mark_failed(paper_id, error_msg)
+                return {
+                    "paper_id": paper_id,
+                    "file": pdf_file.name,
+                    "status": "failed",
+                    "chunks": 0,
+                    "error": error_msg,
+                }
+
+            # Step 5: Update record only on full success
             self.record_mgr.mark_indexed(paper_id, len(chunks))
 
             return {
@@ -259,8 +276,9 @@ def clean_deleted():
     papers_dir = config.paths.papers_dir
     pdf_files = list(papers_dir.glob("*.pdf"))
     record_mgr = get_record_manager()
+    indexer = get_indexer()
 
-    deleted = record_mgr.cleanup_deleted_files(pdf_files)
+    deleted = record_mgr.cleanup_deleted_files(pdf_files, indexer=indexer)
     print(f"Marked {deleted} records as deleted")
 
 

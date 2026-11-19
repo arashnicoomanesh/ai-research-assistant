@@ -253,9 +253,9 @@ Workflow:
             logger.info(f"Backing up existing graph to {backup_dir}")
             shutil.copytree(graph_dir, backup_dir)
 
-        # Step 2: Clean the graph
+        # Step 2: Clean the graph - create fresh store in the correct graph_dir
         logger.info("Cleaning existing graph...")
-        graph_store = get_graph_store(graph_dir=str(graph_dir.parent))  # Create fresh store
+        graph_store = get_graph_store(graph_dir=str(graph_dir))  # Create fresh store in data/graph
         # The fresh store will start with empty graph
 
         # Step 3: Rebuild abstracts-only limited graph
@@ -270,7 +270,7 @@ Workflow:
         if not chunks:
             logger.warning("No chunks found. Index papers first.")
             # Still show stats from backup if it exists
-            if backup_dir.exists():
+            if 'backup_dir' in locals() and backup_dir.exists():
                 logger.info(f"Using backed-up graph from {backup_dir}")
                 # Re-initialize from backup - for now just return
                 return

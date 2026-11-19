@@ -66,7 +66,7 @@ class MetricsRecorder:
         self.summary["faithfulness_rate"] = faithful_count / total if total else 0.0
 
         # Citation rate
-        citation_count = sum(1 for r in self.results.values() if r.get("has_citation", False))
+        citation_count = sum(1 for r in self.results.values() if r.get("has_citation", False) or r.get("citation_present", False))
         self.summary["citation_rate"] = citation_count / total if total else 0.0
 
         # Strategy distribution
@@ -99,12 +99,16 @@ def measure_latency(func):
         func: Function to measure
 
     Returns:
-        Decorated function that returns (result, latency_in_seconds)
+        Decorated function that returns (result, latency_in_seconds) for non-dict results,
+        or adds "latency" key to dict results and returns the dict.
     """
     def wrapper(*args, **kwargs):
         start = time.time()
         result = func(*args, **kwargs)
         latency = time.time() - start
+        if isinstance(result, dict):
+            result["latency"] = latency
+            return result
         return result, latency
     return wrapper
 
@@ -165,21 +169,71 @@ def summarize_metrics(metrics_record: Dict[str, Any]) -> Dict[str, Any]:
     Summarize metrics from a single evaluation run.
 
     Args:
-        metrics_record: Dict from MetricsRecorder
+        metrics_record: Dict from MetricsRecorder.get_results() (id -> result mapping)
+                        or a dict with "results" and "summary" keys.
 
     Returns:
         Summary dict with key metrics
     """
-    recorder = MetricsRecorder()
-    recorder.results = metrics_record.get("results", {})
-    recorder.summary = metrics_record.get("summary", {})
+    # Handle both formats: wrapped {results: {...}, summary: {...}} or plain id->result mapping
+    if "results" in metrics_record and isinstance(metrics_record["results"], dict):
+        results = metrics_record["results"]
+        summary = metrics_record.get("summary", {})
+    else:
+        results = metrics_record
+        summary = {}
+
+    # If summary is empty or incomplete, rebuild it
+    if not summary or "total_questions" not in summary:
+        total = len(results)
+        if total == 0:
+            return {
+                "total_questions": 0,
+                "avg_latency_seconds": 0.0,
+                "cache_hit_rate": 0.0,
+                "faithfulness_rate": 0.0,
+                "citation_rate": 0.0,
+                "retrieval_success_rate": 0.0,
+                "strategy_distribution": {},
+            }
+
+        latencies = [r.get("latency", 0.0) for r in results.values()]
+        avg_latency = sum(latencies) / len(latencies) if latencies else 0.0
+
+        cache_hits = sum(1 for r in results.values() if r.get("cache_hit", False))
+        cache_hit_rate = cache_hits / total if total else 0.0
+
+        faithful_count = sum(1 for r in results.values() if r.get("faithful", False))
+        faithfulness_rate = faithful_count / total if total else 0.0
+
+        citation_count = sum(1 for r in results.values() if r.get("has_citation", False) or r.get("citation_present", False))
+        citation_rate = citation_count / total if total else 0.0
+
+        strategy_counts: Dict[str, int] = {}
+        for r in results.values():
+            s = r.get("strategy", "unknown")
+            strategy_counts[s] = strategy_counts.get(s, 0) + 1
+        strategy_distribution = {k: v / total for k, v in strategy_counts.items()}
+
+        success_count = sum(1 for r in results.values() if r.get("retrieval_success", False))
+        retrieval_success_rate = success_count / total if total else 0.0
+
+        summary = {
+            "total_questions": total,
+            "avg_latency": avg_latency,
+            "cache_hit_rate": cache_hit_rate,
+            "faithfulness_rate": faithfulness_rate,
+            "citation_rate": citation_rate,
+            "retrieval_success_rate": retrieval_success_rate,
+            "strategy_distribution": strategy_distribution,
+        }
 
     return {
-        "total_questions": recorder.summary.get("total_questions", 0),
-        "avg_latency_seconds": recorder.summary.get("avg_latency", 0.0),
-        "cache_hit_rate": recorder.summary.get("cache_hit_rate", 0.0),
-        "faithfulness_rate": recorder.summary.get("faithfulness_rate", 0.0),
-        "citation_rate": recorder.summary.get("citation_rate", 0.0),
-        "retrieval_success_rate": recorder.summary.get("retrieval_success_rate", 0.0),
-        "strategy_distribution": recorder.summary.get("strategy_distribution", {}),
+        "total_questions": summary.get("total_questions", 0),
+        "avg_latency_seconds": summary.get("avg_latency", 0.0),
+        "cache_hit_rate": summary.get("cache_hit_rate", 0.0),
+        "faithfulness_rate": summary.get("faithfulness_rate", 0.0),
+        "citation_rate": summary.get("citation_rate", 0.0),
+        "retrieval_success_rate": summary.get("retrieval_success_rate", 0.0),
+        "strategy_distribution": summary.get("strategy_distribution", {}),
     }

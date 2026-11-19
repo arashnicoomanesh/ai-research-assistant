@@ -266,23 +266,37 @@ class HybridRetriever:
         """
         Expand child chunks to include their parent chunks for better context.
 
+        When a parent is added because of a child hit, the parent inherits
+        the maximum score of all children that expanded to it, so parents
+        are not eliminated solely due to missing/low retrieval score.
+
         Args:
             chunks: List of child chunk dicts with parent_id
 
         Returns:
             List of chunks with parent chunks included (deduplicated)
         """
+        # Map parent_id -> list of child scores that reference it
+        parent_to_child_scores: Dict[str, List[float]] = {}
         parent_ids = set()
+
         for chunk in chunks:
             pid = chunk.get("parent_id")
+            score = chunk.get("score", 0.0)
             if pid:
                 parent_ids.add(pid)
+                if pid not in parent_to_child_scores:
+                    parent_to_child_scores[pid] = []
+                parent_to_child_scores[pid].append(score)
 
         # Fetch all unique parents
         parents = []
         for pid in parent_ids:
             parent = self.get_parent_chunk(pid)
             if parent:
+                # Assign parent the max score of triggering children
+                child_scores = parent_to_child_scores.get(pid, [0.0])
+                parent["score"] = max(child_scores)
                 parents.append(parent)
 
         # Combine children and parents, deduplicate by chunk_id
@@ -295,10 +309,11 @@ class HybridRetriever:
                 seen.add(cid)
                 combined.append(chunk)
 
-        # Sort by score (children have scores, parents don't - put parents first for context)
+        # Sort by score (children have scores, parents now inherit max child score)
         combined.sort(key=lambda x: (x.get("score", 0), x.get("chunk_type") != "parent"), reverse=True)
 
-        logger.info(f"Expanded {len(chunks)} children to {len(combined)} total chunks with {len(parents)} parents")
+        logger.info(f"Expanded {len(chunks)} children to {len(combined)} total chunks with {len(parents)} parents "
+                    f"(parents inherit child scores)")
 
         return combined
 

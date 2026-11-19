@@ -48,7 +48,7 @@ python src/main.py "Define neural network"
 python src/main.py "What year was the transformer paper published?"
 ```
 
-### Single-Shot / CRAG (Paper-Specific Facts)
+### Single-Shot / CRAG (Paper-Specific Facts) — Default in Reliable Mode
 
 ```bash
 python src/main.py "What is the attention mechanism in the Attention Is All You Need paper?"
@@ -56,20 +56,20 @@ python src/main.py "How does BERT differ from GPT?"
 python src/main.py "What datasets were used in the Llama 2 paper?"
 ```
 
-### Multi-Step (Complex/Comparative)
+### Multi-Step (Complex/Comparative) — Requires EXPERIMENTAL_ROUTING=true
 
 ```bash
-python src/main.py "Compare transformer and RNN architectures for sequence modeling"
-python src/main.py "What are the tradeoffs between dense and sparse attention?"
-python src/main.py "Summarize the evolution from BERT to GPT-4"
+EXPERIMENTAL_ROUTING=true python src/main.py "Compare transformer and RNN architectures for sequence modeling"
+EXPERIMENTAL_ROUTING=true python src/main.py "What are the tradeoffs between dense and sparse attention?"
+EXPERIMENTAL_ROUTING=true python src/main.py "Summarize the evolution from BERT to GPT-4"
 ```
 
-### RAPTOR (Deep Research / Survey Questions)
+### RAPTOR-inspired (Deep Research / Survey Questions) — Requires EXPERIMENTAL_ROUTING=true
 
 ```bash
-python src/main.py "What are the main approaches to efficient transformers?"
-python src.main.py "Survey the literature on retrieval-augmented generation"
-python src.main.py "How has model scaling evolved from 2017 to 2024?"
+EXPERIMENTAL_ROUTING=true python src/main.py "What are the main approaches to efficient transformers?"
+EXPERIMENTAL_ROUTING=true python src/main.py "Survey the literature on retrieval-augmented generation"
+EXPERIMENTAL_ROUTING=true python src/main.py "How has model scaling evolved from 2017 to 2024?"
 ```
 
 ---
@@ -196,7 +196,6 @@ OLLAMA_EMBEDDING_MODEL=mxbai-embed-large:335m
 ```bash
 # More results for complex queries
 TOP_K_DENSE=20
-TOP_K_BM25=20
 TOP_K_FINAL=10
 
 # Larger chunks for better context
@@ -313,12 +312,12 @@ print(f"Indexed {stats['processed']} papers, {stats['total_chunks']} chunks")
 # 1. Ingest a batch of papers on a topic
 python scripts/ingest_papers.py
 
-# 2. Build RAPTOR for deep retrieval
+# 2. Build RAPTOR-inspired summaries for deep retrieval
 python scripts/build_raptor.py
 
-# 3. Ask survey-style questions
-python src/main.py "What are the main approaches to X?"
-python src/main.py "Compare methods A, B, and C for Y"
+# 3. Ask survey-style questions (requires EXPERIMENTAL_ROUTING=true)
+EXPERIMENTAL_ROUTING=true python src/main.py "What are the main approaches to X?"
+EXPERIMENTAL_ROUTING=true python src/main.py "Compare methods A, B, and C for Y"
 ```
 
 ### Fact Checking

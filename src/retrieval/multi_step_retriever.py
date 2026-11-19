@@ -45,6 +45,7 @@ class MultiStepResult:
     gap_identified: bool = False
     total_retrievals: int = 0
     process_log: List[str] = field(default_factory=list)
+    multi_step_metadata: Optional[Dict[str, Any]] = None
 
 
 class MultiStepRetriever:
@@ -123,7 +124,11 @@ class MultiStepRetriever:
                 cid = chunk.get("chunk_id", "")
                 if cid and cid not in seen_ids:
                     seen_ids.add(cid)
-                    all_chunks.append(chunk)
+                    # Add provenance to chunk
+                    chunk_copy = dict(chunk)
+                    chunk_copy["sub_question_index"] = sq.index
+                    chunk_copy["sub_question"] = sq.question
+                    all_chunks.append(chunk_copy)
 
             # Store metadata from this retrieval
             sq.retrieval_success = len(cr_result.chunks) > 0
@@ -135,12 +140,12 @@ class MultiStepRetriever:
 
         # Step 3: Gap analysis - ask LLM if evidence is sufficient
         gap_result = self._gap_analysis(query, all_chunks, sub_questions)
-        result.gap_identified = gap_result["gap_identified"]
+        result.gap_identified = gap_result.get("gap_identified", False)
         result.process_log.append(f"Gap analysis: {'identified - need follow-up' if result.gap_identified else 'sufficient'}")
 
         # Step 4: If gap identified, do follow-up retrieval
         if result.gap_identified and self.max_follow_up > 0:
-            follow_up = gap_result["follow_up_question"]
+            follow_up = gap_result.get("follow_up_question")
             result.process_log.append(f"Generating follow-up question: '{follow_up[:60]}...'")
             result.follow_up_question = follow_up
 
@@ -152,7 +157,10 @@ class MultiStepRetriever:
                 cid = chunk.get("chunk_id", "")
                 if cid and cid not in seen_ids:
                     seen_ids.add(cid)
-                    all_chunks.append(chunk)
+                    chunk_copy = dict(chunk)
+                    chunk_copy["sub_question_index"] = "follow_up"
+                    chunk_copy["sub_question"] = follow_up
+                    all_chunks.append(chunk_copy)
 
             result.process_log.append(
                 f"  -> Follow-up retrieval got {len(fr_result.chunks)} additional chunks"
@@ -162,6 +170,24 @@ class MultiStepRetriever:
         # Also re-grade to ensure quality
         result.all_chunks = all_chunks
         result.sub_questions = sub_questions
+
+        # Build multi_step_metadata
+        result.multi_step_metadata = {
+            "sub_questions": [
+                {
+                    "index": sq.index,
+                    "question": sq.question,
+                    "retrieval_success": sq.retrieval_success,
+                    "relevance_score": sq.relevance_score,
+                }
+                for sq in sub_questions
+            ],
+            "follow_up_question": result.follow_up_question,
+            "gap_identified": result.gap_identified,
+            "total_retrievals": result.total_retrievals,
+            "num_chunks": len(all_chunks),
+            "process_log": list(result.process_log),
+        }
 
         result.process_log.append(
             f"Final result: {len(all_chunks)} deduplicated chunks, "
@@ -241,7 +267,7 @@ Return ONLY the JSON structure specified."""
                     f"Decomposed query into {len(questions)} sub-questions",
                     f"Reasoning: {reasoning}",
                 ]
-                logger.debug(f"Query decomposition: {process_log}")
+                logger.debug(f"Query decomposition: {result_process_log}")
 
                 return questions
 

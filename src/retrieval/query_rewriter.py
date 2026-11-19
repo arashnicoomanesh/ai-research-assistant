@@ -7,6 +7,7 @@ query formulations for better recall.
 """
 import json
 import logging
+import re
 from typing import List, Optional
 from dataclasses import dataclass
 from src.core.llm import OllamaLLM, get_llm
@@ -43,6 +44,7 @@ Guidelines:
 3. Add relevant technical keywords that might appear in papers
 4. Make the query more specific and searchable
 5. Keep the original intent intact
+6. **CRITICAL: Preserve all named entities, method names, paper titles, acronyms, and technical proper nouns from the original query (e.g., "Self-RAG", "CRAG", "BERT", "GPT-3", "FlashAttention", "LoRA"). Do NOT replace or generalize these away.**
 
 Output MUST be valid JSON with this exact structure:
 {
@@ -130,6 +132,9 @@ Return ONLY the JSON structure specified."""
             alternatives = alternatives[:self.num_alternatives]
             reasoning = data.get("reasoning", "No reasoning provided")
 
+            # Post-process: ensure key entities from original are preserved in rewrite
+            rewritten = self._preserve_entities(original, rewritten)
+
             return RewrittenQuery(
                 original=original,
                 rewritten=rewritten,
@@ -145,6 +150,48 @@ Return ONLY the JSON structure specified."""
                 alternatives=[],
                 reasoning=f"Parse error: {e}",
             )
+
+    def _preserve_entities(self, original: str, rewritten: str) -> str:
+        """
+        Ensure salient entities (acronyms, proper nouns, method names) from original
+        appear in the rewritten query. If missing, merge them back.
+        """
+        # Extract candidate entities from original using token-based approach
+        # to avoid regex word-boundary issues with hyphens and punctuation.
+        # We tokenize on word chars + internal hyphens, then apply precise patterns.
+        acronym_pattern = re.compile(r'^[A-Z]{2,}(?:-\d+)?$')
+        hyphenated_pattern = re.compile(r'^[A-Z][a-z]+(?:-[A-Z][A-Za-z]*)+$')
+        camel_pattern = re.compile(r'^[A-Z][a-z]*(?:[A-Z][a-z]*)+$')  # At least 2 capital groups
+
+        def extract_entities(text: str) -> set[str]:
+            # Tokenize: sequences of alphanumerics with internal hyphens
+            tokens = re.findall(r'[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*', text)
+            entities = set()
+            for token in tokens:
+                # Strip trailing punctuation that may be attached
+                token = token.rstrip('.,?!:;)')
+                if (acronym_pattern.match(token) or
+                    hyphenated_pattern.match(token) or
+                    camel_pattern.match(token)):
+                    entities.add(token)
+            return entities
+
+        original_entities = extract_entities(original)
+
+        if not original_entities:
+            return rewritten
+
+        # Check which entities are missing from rewrite (case-insensitive)
+        rewritten_lower = rewritten.lower()
+        missing = [ent for ent in original_entities if ent.lower() not in rewritten_lower]
+
+        if missing:
+            # Prepend missing entities to the rewrite
+            prefix = " ".join(missing) + " "
+            logger.debug(f"Query rewrite dropped entities {missing}, prepending to rewrite")
+            return prefix + rewritten
+
+        return rewritten
 
     def rewrite_batch(self, queries: List[str]) -> List[RewrittenQuery]:
         """Rewrite multiple queries."""

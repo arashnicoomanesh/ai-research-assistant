@@ -263,12 +263,14 @@ class RecordManager:
             ).fetchone()[0]
             return stats
 
-    def cleanup_deleted_files(self, existing_files: List[Path]) -> int:
+    def cleanup_deleted_files(self, existing_files: List[Path], indexer=None) -> int:
         """
         Mark records as deleted for files that no longer exist.
+        Optionally delete vectors from Qdrant if indexer is provided.
 
         Args:
             existing_files: List of currently existing PDF files
+            indexer: Optional QdrantIndexer instance to delete vectors
 
         Returns:
             Number of records marked as deleted
@@ -281,7 +283,15 @@ class RecordManager:
             deleted_count = 0
             for row in rows:
                 if row["paper_id"] not in existing_ids:
-                    self.mark_deleted(row["paper_id"])
+                    paper_id = row["paper_id"]
+                    self.mark_deleted(paper_id)
+                    # Also delete vectors from Qdrant if indexer provided
+                    if indexer is not None:
+                        try:
+                            indexer.delete_paper_chunks(paper_id)
+                            logger.info(f"Deleted vectors for removed paper: {paper_id}")
+                        except Exception as e:
+                            logger.error(f"Failed to delete vectors for {paper_id}: {e}")
                     deleted_count += 1
             return deleted_count
 

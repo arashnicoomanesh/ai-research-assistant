@@ -67,8 +67,8 @@ class OllamaLLM:
             "prompt": prompt,
             "stream": False,
             "options": {
-                "temperature": temperature or config.generation.temperature,
-                "num_predict": max_tokens or config.generation.max_tokens,
+                "temperature": temperature if temperature is not None else config.generation.temperature,
+                "num_predict": max_tokens if max_tokens is not None else config.generation.max_tokens,
                 **kwargs
             }
         }
@@ -110,8 +110,8 @@ class OllamaLLM:
             "prompt": prompt,
             "stream": True,
             "options": {
-                "temperature": temperature or config.generation.temperature,
-                "num_predict": max_tokens or config.generation.max_tokens,
+                "temperature": temperature if temperature is not None else config.generation.temperature,
+                "num_predict": max_tokens if max_tokens is not None else config.generation.max_tokens,
                 **kwargs
             }
         }
@@ -165,8 +165,8 @@ class OllamaLLM:
             "messages": messages,
             "stream": False,
             "options": {
-                "temperature": temperature or config.generation.temperature,
-                "num_predict": max_tokens or config.generation.max_tokens,
+                "temperature": temperature if temperature is not None else config.generation.temperature,
+                "num_predict": max_tokens if max_tokens is not None else config.generation.max_tokens,
                 **kwargs
             }
         }
@@ -203,8 +203,8 @@ class OllamaLLM:
             "messages": messages,
             "stream": True,
             "options": {
-                "temperature": temperature or config.generation.temperature,
-                "num_predict": max_tokens or config.generation.max_tokens,
+                "temperature": temperature if temperature is not None else config.generation.temperature,
+                "num_predict": max_tokens if max_tokens is not None else config.generation.max_tokens,
                 **kwargs
             }
         }
