@@ -160,7 +160,10 @@ def _parse_relations(
 
         source_id = _normalize_entity_id(source)
         target_id = _normalize_entity_id(target)
-        rel_id = f"{source_id}_{rel_type}_{target_id}"
+        # Include paper_id and chunk_id in relation ID for provenance
+        # This ensures relations from different papers/chunks don't overwrite each other
+        chunk_suffix = f"_{chunk_id}" if chunk_id else ""
+        rel_id = f"{source_id}_{rel_type}_{target_id}_{paper_id}{chunk_suffix}"
 
         relation = Relation(
             id=rel_id,

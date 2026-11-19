@@ -69,6 +69,7 @@ This repository is a **RAG laboratory** — a complete, hackable system where se
 - 1-hop neighborhood traversal + triple collection
 - Supporting Qdrant chunk fusion for grounded answers
 - Graph-backed answer generation
+- **Edges require both endpoints; relation IDs include paper/chunk provenance** (no dangling edges, no overwriting across papers)
 - **Stage B roadmap:** Community detection + global summary reports
 
 ### E. Evaluation, Product & Ops

@@ -381,6 +381,9 @@ class GraphStore:
         """
         Add or update relations in the graph.
 
+        Both source and target entities must exist in the graph.
+        Relations with missing endpoints are rejected (not stored).
+
         Args:
             relations: List of Relation objects
 
@@ -393,6 +396,14 @@ class GraphStore:
 
         count = 0
         for relation in relations:
+            # Check both endpoints exist
+            if relation.source_id not in self._graph:
+                logger.warning(f"Skipping relation {relation.id}: source '{relation.source_id}' not in graph")
+                continue
+            if relation.target_id not in self._graph:
+                logger.warning(f"Skipping relation {relation.id}: target '{relation.target_id}' not in graph")
+                continue
+
             edge_data = {
                 "relation_type": relation.relation_type.value
                 if isinstance(relation.relation_type, RelationType)
