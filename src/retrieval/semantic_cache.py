@@ -12,6 +12,7 @@ from typing import List, Optional, Dict, Any
 from dataclasses import dataclass, asdict
 import numpy as np
 from src.core.embeddings import OllamaEmbeddings, get_embeddings
+from src.core.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,8 @@ class CacheEntry:
     strategy: str
     timestamp: float
     hit_count: int = 0
+    llm_model: str = ""
+    embedding_model: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -34,6 +37,10 @@ class CacheEntry:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "CacheEntry":
         """Create from dictionary."""
+        # Handle backward compatibility for entries without model fields
+        data = data.copy()
+        data.setdefault("llm_model", "")
+        data.setdefault("embedding_model", "")
         return cls(**data)
 
 
@@ -43,6 +50,7 @@ class SemanticCache:
 
     Uses embedding similarity to find cached answers for similar queries.
     Stores cache on disk as JSON for persistence.
+    Supports TTL expiration and model-based invalidation.
     """
 
     def __init__(
@@ -51,6 +59,9 @@ class SemanticCache:
         similarity_threshold: float = 0.92,
         max_entries: int = 1000,
         cache_path: Optional[str] = None,
+        ttl_seconds: int = 0,
+        llm_model: str = "",
+        embedding_model: str = "",
     ):
         """
         Initialize semantic cache.
@@ -60,11 +71,17 @@ class SemanticCache:
             similarity_threshold: Minimum cosine similarity for cache hit (0.0-1.0)
             max_entries: Maximum number of entries to keep
             cache_path: Path to cache file (None = in-memory only)
+            ttl_seconds: Time-to-live in seconds (0 or negative = no TTL)
+            llm_model: LLM model name for cache identity
+            embedding_model: Embedding model name for cache identity
         """
         self.embeddings = embeddings or get_embeddings()
         self.similarity_threshold = similarity_threshold
         self.max_entries = max_entries
         self.cache_path = Path(cache_path) if cache_path else None
+        self.ttl_seconds = ttl_seconds
+        self.llm_model = llm_model or config.ollama.llm_model
+        self.embedding_model = embedding_model or config.ollama.embedding_model
         self.entries: List[CacheEntry] = []
 
         # Load existing cache if path provided
@@ -72,7 +89,7 @@ class SemanticCache:
             self._load()
 
     def _load(self) -> None:
-        """Load cache from disk."""
+        """Load cache from disk, filtering expired and model-mismatched entries."""
         if not self.cache_path or not self.cache_path.exists():
             logger.info("No existing cache file, starting fresh")
             return
@@ -81,8 +98,44 @@ class SemanticCache:
             with open(self.cache_path, "r") as f:
                 data = json.load(f)
 
-            self.entries = [CacheEntry.from_dict(item) for item in data]
-            logger.info(f"Loaded {len(self.entries)} cache entries from {self.cache_path}")
+            loaded_entries = [CacheEntry.from_dict(item) for item in data]
+            original_count = len(loaded_entries)
+
+            # Filter: model mismatch
+            model_mismatch = 0
+            filtered = []
+            for entry in loaded_entries:
+                if entry.llm_model and entry.llm_model != self.llm_model:
+                    model_mismatch += 1
+                    continue
+                if entry.embedding_model and entry.embedding_model != self.embedding_model:
+                    model_mismatch += 1
+                    continue
+                filtered.append(entry)
+
+            # Filter: TTL expiration
+            expired = 0
+            if self.ttl_seconds > 0:
+                now = time.time()
+                final_entries = []
+                for entry in filtered:
+                    if now - entry.timestamp <= self.ttl_seconds:
+                        final_entries.append(entry)
+                    else:
+                        expired += 1
+            else:
+                final_entries = filtered
+
+            self.entries = final_entries
+
+            if model_mismatch or expired:
+                logger.info(
+                    f"Loaded cache: {original_count} entries, "
+                    f"filtered {model_mismatch} model mismatch, {expired} TTL expired, "
+                    f"{len(self.entries)} remaining"
+                )
+            else:
+                logger.info(f"Loaded {len(self.entries)} cache entries from {self.cache_path}")
 
         except Exception as e:
             logger.warning(f"Failed to load cache: {e}")
@@ -111,6 +164,40 @@ class SemanticCache:
         v2 = np.array(vec2)
         return float(np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2)))
 
+    def _is_expired(self, entry: CacheEntry) -> bool:
+        """Check if entry is expired based on TTL."""
+        if self.ttl_seconds <= 0:
+            return False
+        return time.time() - entry.timestamp > self.ttl_seconds
+
+    def _model_mismatch(self, entry: CacheEntry) -> bool:
+        """Check if entry was created with different models."""
+        if entry.llm_model and entry.llm_model != self.llm_model:
+            return True
+        if entry.embedding_model and entry.embedding_model != self.embedding_model:
+            return True
+        return False
+
+    def _cleanup_entries(self) -> int:
+        """Remove expired and model-mismatched entries from cache. Returns count removed."""
+        if not self.entries:
+            return 0
+
+        original_count = len(self.entries)
+        now = time.time()
+
+        self.entries = [
+            e for e in self.entries
+            if not self._is_expired(e) and not self._model_mismatch(e)
+        ]
+
+        removed = original_count - len(self.entries)
+        if removed:
+            self._save()
+            logger.debug(f"Cleaned up {removed} stale cache entries")
+
+        return removed
+
     def get(self, query: str) -> Optional[Dict[str, Any]]:
         """
         Check cache for similar query.
@@ -121,6 +208,12 @@ class SemanticCache:
         Returns:
             Cached answer dict if hit, None if miss
         """
+        if not self.entries:
+            return None
+
+        # Clean up expired and model-mismatched entries
+        self._cleanup_entries()
+
         if not self.entries:
             return None
 
@@ -136,6 +229,13 @@ class SemanticCache:
         best_similarity = 0.0
 
         for entry in self.entries:
+            # Skip expired entries
+            if self._is_expired(entry):
+                continue
+            # Skip model-mismatched entries
+            if self._model_mismatch(entry):
+                continue
+
             similarity = self._cosine_similarity(query_embedding, entry.query_embedding)
             if similarity > best_similarity:
                 best_similarity = similarity
@@ -193,6 +293,8 @@ class SemanticCache:
             strategy=strategy,
             timestamp=time.time(),
             hit_count=0,
+            llm_model=self.llm_model,
+            embedding_model=self.embedding_model,
         )
 
         # Check if similar entry already exists (update instead of duplicate)
@@ -203,6 +305,8 @@ class SemanticCache:
                 existing.sources = sources
                 existing.strategy = strategy
                 existing.timestamp = time.time()
+                existing.llm_model = self.llm_model
+                existing.embedding_model = self.embedding_model
                 self._save()
                 logger.debug(f"Updated existing cache entry (similarity={similarity:.4f})")
                 return
@@ -224,6 +328,22 @@ class SemanticCache:
         self._save()
         logger.info("Cache cleared")
 
+    def invalidate(self, reason: str = "manual") -> int:
+        """
+        Invalidate (clear) all cache entries.
+
+        Args:
+            reason: Reason for invalidation (for logging)
+
+        Returns:
+            Number of entries that were cleared
+        """
+        count = len(self.entries)
+        self.entries = []
+        self._save()
+        logger.info(f"Cache invalidated ({reason}): cleared {count} entries")
+        return count
+
     def stats(self) -> Dict[str, Any]:
         """Get cache statistics."""
         if not self.entries:
@@ -235,6 +355,9 @@ class SemanticCache:
             "total_hits": total_hits,
             "cache_path": str(self.cache_path) if self.cache_path else "memory",
             "similarity_threshold": self.similarity_threshold,
+            "ttl_seconds": self.ttl_seconds,
+            "llm_model": self.llm_model,
+            "embedding_model": self.embedding_model,
             "oldest_entry": min(e.timestamp for e in self.entries) if self.entries else None,
             "newest_entry": max(e.timestamp for e in self.entries) if self.entries else None,
         }
@@ -245,6 +368,17 @@ def get_cache(
     similarity_threshold: float = 0.92,
     max_entries: int = 1000,
     cache_path: Optional[str] = None,
+    ttl_seconds: int = 0,
+    llm_model: str = "",
+    embedding_model: str = "",
 ) -> SemanticCache:
     """Get a cache instance."""
-    return SemanticCache(embeddings, similarity_threshold, max_entries, cache_path)
+    return SemanticCache(
+        embeddings=embeddings,
+        similarity_threshold=similarity_threshold,
+        max_entries=max_entries,
+        cache_path=cache_path,
+        ttl_seconds=ttl_seconds,
+        llm_model=llm_model,
+        embedding_model=embedding_model,
+    )

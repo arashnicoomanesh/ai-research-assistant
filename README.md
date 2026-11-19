@@ -48,7 +48,7 @@ This repository is a **RAG laboratory** — a complete, hackable system where se
 - Hybrid retrieval: dense vector (Qdrant `query_points`) + BM25 keyword search with RRF fusion
 - Parent expansion (child→parent lookup via payload `chunk_id`)
 - Cited answer generation (grounded, per-source citations)
-- Semantic cache (exact-repeat HIT → instant answer; similarity-based, no TTL)
+- Semantic cache (similarity-based; optional TTL; invalidates on ingest/model change)
 - CPU-Safe Mode (default ON; defers expensive ops)
 
 ### C. Advanced RAG Modules
@@ -58,7 +58,7 @@ This repository is a **RAG laboratory** — a complete, hackable system where se
 - **RAPTOR-inspired hierarchical summaries** — Build/merge summary layers from child chunks (limited hierarchy; not full RAPTOR clustering tree)
 - **Document grading** — LLM-based relevance filter (OFF by default in CPU mode)
 - **Faithfulness self-check** — Answer-vs-sources validation (OFF by default in CPU mode)
-- **Semantic cache / cost optimization** — Dedupe identical/similar queries; max-entries eviction (no TTL)
+- **Semantic cache / cost optimization** — Dedupe identical/similar queries; max-entries eviction; optional TTL; auto-invalidates on corpus re-ingest or LLM/embedding model change
 
 ### D. GraphRAG Stack
 - Entity/relation extraction (LLM with 3-stage CPU fallback)

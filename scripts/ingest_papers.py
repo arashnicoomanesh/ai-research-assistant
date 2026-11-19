@@ -26,6 +26,7 @@ from src.ingestion.chunker import ParentChildChunker, Chunk, chunk_paper
 from src.ingestion.indexer import QdrantIndexer, get_indexer, IndexStats
 from src.ingestion.record_manager import RecordManager, get_record_manager, create_record, PaperRecord
 from src.retrieval.bm25_index import get_bm25_indexer
+from src.retrieval.semantic_cache import get_cache
 from src.core.config import config
 
 # Setup logging
@@ -116,6 +117,14 @@ class IngestionPipeline:
                 self.bm25_indexer.build_from_qdrant()
             except Exception as e:
                 logger.warning(f"BM25 index rebuild failed: {e}")
+
+            # 6. Invalidate semantic cache since corpus has changed
+            logger.info("Invalidating semantic cache due to corpus change...")
+            try:
+                cache = get_cache()
+                cache.invalidate(reason="corpus change after ingestion")
+            except Exception as e:
+                logger.warning(f"Cache invalidation failed: {e}")
 
         return stats
 

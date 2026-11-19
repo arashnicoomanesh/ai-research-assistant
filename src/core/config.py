@@ -65,6 +65,15 @@ class GenerationConfig:
 
 
 @dataclass
+class CacheConfig:
+    """Semantic cache configuration."""
+    path: str = os.getenv("CACHE_PATH", "data/cache/semantic_cache.json")
+    similarity_threshold: float = float(os.getenv("CACHE_SIMILARITY_THRESHOLD", "0.92"))
+    max_entries: int = int(os.getenv("CACHE_MAX_ENTRIES", "1000"))
+    ttl_seconds: int = int(os.getenv("CACHE_TTL_SECONDS", "0"))  # 0 = no TTL
+
+
+@dataclass
 class CPUSafeConfig:
     """CPU-safe mode configuration for resource-constrained environments."""
     enabled: bool = os.getenv("CPU_SAFE_MODE", "true").lower() == "true"
@@ -85,11 +94,13 @@ class PathsConfig:
     papers_dir: Path = Path(os.getenv("PAPERS_DIR", str(project_root / "data" / "papers")))
     processed_dir: Path = Path(os.getenv("PROCESSED_DIR", str(project_root / "data" / "processed")))
     bm25_index_dir: Path = Path(os.getenv("BM25_INDEX_DIR", str(project_root / "data" / "processed" / "bm25")))
+    cache_dir: Path = Path(os.getenv("CACHE_DIR", str(project_root / "data" / "cache")))
 
     def __post_init__(self):
         self.papers_dir.mkdir(parents=True, exist_ok=True)
         self.processed_dir.mkdir(parents=True, exist_ok=True)
         self.bm25_index_dir.mkdir(parents=True, exist_ok=True)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
 
 
 @dataclass
@@ -113,6 +124,7 @@ class Config:
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     generation: GenerationConfig = field(default_factory=GenerationConfig)
+    cache: CacheConfig = field(default_factory=CacheConfig)
     cpu_safe: CPUSafeConfig = field(default_factory=CPUSafeConfig)
     paths: PathsConfig = field(default_factory=PathsConfig)
     graph: GraphConfig = field(default_factory=GraphConfig)

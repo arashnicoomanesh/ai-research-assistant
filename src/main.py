@@ -170,9 +170,12 @@ class ResearchAssistant:
         )
         self.cache = get_cache(
             embeddings=self.embeddings,
-            similarity_threshold=0.92,
-            max_entries=1000,
+            similarity_threshold=config.cache.similarity_threshold,
+            max_entries=config.cache.max_entries,
             cache_path=cache_path,
+            ttl_seconds=config.cache.ttl_seconds,
+            llm_model=config.ollama.llm_model,
+            embedding_model=config.ollama.embedding_model,
         )
 
         # Check services
