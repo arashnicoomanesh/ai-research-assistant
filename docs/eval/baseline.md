@@ -121,6 +121,17 @@ Expected differences:
 
 ---
 
+## 📊 Ablation Matrix
+
+See [ablations.md](ablations.md) for a controlled comparison matrix:
+- **A**: Reliable default (CRAG/single_shot)
+- **B**: Vanilla baseline (`FORCE_STRATEGY=baseline`)
+- **C**: Experimental routing (`RELIABLE_MODE=false EXPERIMENTAL_ROUTING=true`)
+
+Run commands and save to `data/eval/reports/ablation_*.json` for comparison.
+
+---
+
 ## Files Referenced
 
 - Config defaults: `src/core/config.py`
