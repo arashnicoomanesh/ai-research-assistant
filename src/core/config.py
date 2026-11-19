@@ -45,6 +45,7 @@ class RetrievalConfig:
     top_k_bm25: int = int(os.getenv("TOP_K_BM25", "10"))
     top_k_final: int = int(os.getenv("TOP_K_FINAL", "5"))
     rerank_top_k: int = int(os.getenv("RERANK_TOP_K", "20"))
+    hybrid_enabled: bool = os.getenv("HYBRID_ENABLED", "true").lower() == "true"
 
 
 @dataclass
@@ -83,10 +84,12 @@ class PathsConfig:
     project_root: Path = Path(__file__).parent.parent.parent
     papers_dir: Path = Path(os.getenv("PAPERS_DIR", str(project_root / "data" / "papers")))
     processed_dir: Path = Path(os.getenv("PROCESSED_DIR", str(project_root / "data" / "processed")))
+    bm25_index_dir: Path = Path(os.getenv("BM25_INDEX_DIR", str(project_root / "data" / "processed" / "bm25")))
 
     def __post_init__(self):
         self.papers_dir.mkdir(parents=True, exist_ok=True)
         self.processed_dir.mkdir(parents=True, exist_ok=True)
+        self.bm25_index_dir.mkdir(parents=True, exist_ok=True)
 
 
 @dataclass

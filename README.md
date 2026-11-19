@@ -45,7 +45,7 @@ This repository is a **RAG laboratory** — a complete, hackable system where se
 - CLI QA interface (positional, `--question`, interactive)
 - Adaptive query routing (heuristics + optional LLM classifier)
 - Query rewriting (entity-aware, sometimes over-generalizes)
-- Dense vector retrieval (modern Qdrant `query_points` API)
+- Hybrid retrieval: dense vector (Qdrant `query_points`) + BM25 keyword search with RRF fusion
 - Parent expansion (child→parent lookup via payload `chunk_id`)
 - Cited answer generation (grounded, per-source citations)
 - Semantic cache (exact-repeat HIT → instant answer; similarity-based, no TTL)
@@ -103,7 +103,8 @@ This repository is a **RAG laboratory** — a complete, hackable system where se
 | CLI question interface | ✓ Working | positional / `--question` / interactive |
 | Semantic cache | ✓ Working | Exact repeat = cache HIT |
 | Query rewriting | ⚠️ Partial | Sometimes over-generalizes entities |
-| Adaptive routing | ✓ Working | `no_retrieval` / `single_shot` / `multi_step` / `crag_raptor` / `graph_rag` |
+| Adaptive routing | ✓ Working | `no_retrieval` / `baseline` / `single_shot` / `multi_step` / `crag_raptor` / `graph_rag` |
+| Hybrid retrieval (dense + BM25 + RRF) | ✓ Working | BM25 index persisted; RRF fusion (k=60) |
 | Dense retrieval (`query_points`) | ✓ Working | Modern Qdrant API |
 | Parent expansion | ✓ Working | Lookup by payload `chunk_id` |
 | Answer generation + citations | ✓ Working | Grounded answers returned |

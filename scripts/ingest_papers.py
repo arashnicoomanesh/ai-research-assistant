@@ -25,6 +25,7 @@ from src.ingestion.pdf_parser import PDFParser, ParsedPaper, parse_all_papers
 from src.ingestion.chunker import ParentChildChunker, Chunk, chunk_paper
 from src.ingestion.indexer import QdrantIndexer, get_indexer, IndexStats
 from src.ingestion.record_manager import RecordManager, get_record_manager, create_record, PaperRecord
+from src.retrieval.bm25_index import get_bm25_indexer
 from src.core.config import config
 
 # Setup logging
@@ -56,6 +57,7 @@ class IngestionPipeline:
         )
         self.indexer = get_indexer()
         self.record_mgr = get_record_manager()
+        self.bm25_indexer = get_bm25_indexer()
 
     def run(self) -> dict:
         """
@@ -106,6 +108,15 @@ class IngestionPipeline:
 
         # 4. Print summary
         self._print_summary(stats)
+
+        # 5. Rebuild BM25 index if any papers were processed
+        if stats["processed"] > 0:
+            logger.info("Rebuilding BM25 index...")
+            try:
+                self.bm25_indexer.build_from_qdrant()
+            except Exception as e:
+                logger.warning(f"BM25 index rebuild failed: {e}")
+
         return stats
 
     def _process_paper(self, pdf_file: Path) -> dict:
@@ -282,6 +293,14 @@ def clean_deleted():
     print(f"Marked {deleted} records as deleted")
 
 
+def rebuild_bm25():
+    """Rebuild BM25 index from Qdrant."""
+    from src.retrieval.bm25_index import get_bm25_indexer
+    bm25_indexer = get_bm25_indexer()
+    count = bm25_indexer.build_from_qdrant()
+    print(f"Rebuilt BM25 index with {count} documents")
+
+
 def force_reindex_all():
     """Force re-index all papers."""
     pipeline = IngestionPipeline(force_reindex=True)
@@ -314,6 +333,9 @@ Examples:
   python scripts/ingest_papers.py --clean
     Clean up records for deleted files and exit.
 
+  python scripts/ingest_papers.py --rebuild-bm25
+    Rebuild BM25 keyword index from Qdrant and exit.
+
   python scripts/ingest_papers.py --verbose
     Enable debug logging.
 
@@ -340,6 +362,11 @@ Workflow:
         help="Clean up records for deleted files and exit"
     )
     parser.add_argument(
+        "--rebuild-bm25",
+        action="store_true",
+        help="Rebuild BM25 keyword index from Qdrant and exit"
+    )
+    parser.add_argument(
         "--papers-dir", "-d",
         type=Path,
         help="Override papers directory (default: data/papers/)"
@@ -361,6 +388,10 @@ Workflow:
 
     if args.clean:
         clean_deleted()
+        return
+
+    if args.rebuild_bm25:
+        rebuild_bm25()
         return
 
     pipeline = IngestionPipeline(

@@ -13,8 +13,13 @@ from qdrant_client.models import Filter, FieldCondition, MatchValue
 from src.core.config import config
 from src.core.embeddings import OllamaEmbeddings, get_embeddings
 from src.retrieval.qdrant_search import qdrant_search
+from src.retrieval.bm25_index import get_bm25_indexer, BM25Indexer
 
 logger = logging.getLogger(__name__)
+
+
+# RRF constant
+RRF_K = 60
 
 
 @dataclass
@@ -26,14 +31,72 @@ class RetrievalResult:
     total_found: int = 0
 
 
+def _rrf_fuse(
+    dense_results: List[Dict[str, Any]],
+    bm25_results: List[Dict[str, Any]],
+    top_k_final: int,
+    rrf_k: int = RRF_K,
+) -> List[Dict[str, Any]]:
+    """
+    Fuse dense and BM25 results using Reciprocal Rank Fusion (RRF).
+
+    Args:
+        dense_results: Dense results with 'score' and 'chunk_id'
+        bm25_results: BM25 results with 'score' and 'chunk_id'
+        top_k_final: Final number of results to return
+        rrf_k: RRF constant (default 60)
+
+    Returns:
+        Fused and ranked results with 'rrf_score' field
+    """
+    # Compute RRF scores
+    rrf_scores: Dict[str, float] = {}
+    chunk_map: Dict[str, Dict[str, Any]] = {}
+
+    # Process dense results
+    for rank, chunk in enumerate(dense_results, 1):
+        cid = chunk.get("chunk_id")
+        if not cid:
+            continue
+        rrf_scores[cid] = rrf_scores.get(cid, 0.0) + 1.0 / (rrf_k + rank)
+        chunk_map[cid] = chunk
+
+    # Process BM25 results
+    for rank, chunk in enumerate(bm25_results, 1):
+        cid = chunk.get("chunk_id")
+        if not cid:
+            continue
+        rrf_scores[cid] = rrf_scores.get(cid, 0.0) + 1.0 / (rrf_k + rank)
+        if cid not in chunk_map:
+            chunk_map[cid] = chunk
+
+    # Sort by RRF score descending
+    fused = sorted(
+        [(cid, rrf_scores[cid], chunk_map[cid]) for cid in rrf_scores],
+        key=lambda x: x[1],
+        reverse=True,
+    )
+
+    # Build final results
+    final = []
+    for cid, rrf_score, chunk in fused[:top_k_final]:
+        result = chunk.copy()
+        result["rrf_score"] = rrf_score
+        final.append(result)
+
+    return final
+
+
 class HybridRetriever:
     """
-    Retrieves relevant chunks from Qdrant using dense vector search.
+    Retrieves relevant chunks from Qdrant using dense vector search
+    and optionally BM25 keyword search with RRF fusion.
 
     Features:
     - Searches child chunks (dense vectors) for granular retrieval
     - Supports metadata filtering (paper_id, section, chunk_type)
     - Returns child chunks with parent_id for later context expansion
+    - BM25 + RRF fusion when HYBRID_ENABLED and index available
     - No LangChain dependencies
     """
 
@@ -43,6 +106,8 @@ class HybridRetriever:
         embeddings: Optional[OllamaEmbeddings] = None,
         collection_name: Optional[str] = None,
         top_k: Optional[int] = None,
+        bm25_indexer: Optional[BM25Indexer] = None,
+        hybrid_enabled: Optional[bool] = None,
     ):
         """
         Initialize hybrid retriever.
@@ -52,6 +117,8 @@ class HybridRetriever:
             embeddings: Embeddings client (creates default if None)
             collection_name: Collection name (from config if None)
             top_k: Number of results to retrieve (from config if None)
+            bm25_indexer: BM25 indexer instance (creates default if None)
+            hybrid_enabled: Whether to enable BM25+RRF fusion (default from config)
         """
         self.client = client or QdrantClient(
             host=config.qdrant.host,
@@ -60,6 +127,22 @@ class HybridRetriever:
         self.embeddings = embeddings or get_embeddings()
         self.collection_name = collection_name or config.qdrant.collection
         self.top_k = top_k or config.retrieval.top_k_dense
+
+        # BM25 indexer (lazy init)
+        self._bm25_indexer = bm25_indexer
+        self.hybrid_enabled = hybrid_enabled if hybrid_enabled is not None else config.retrieval.hybrid_enabled
+
+    @property
+    def bm25_indexer(self) -> Optional[BM25Indexer]:
+        """Lazy-initialize BM25 indexer."""
+        if self._bm25_indexer is None and self.hybrid_enabled:
+            try:
+                self._bm25_indexer = get_bm25_indexer()
+                logger.info(f"BM25 indexer initialized: {self._bm25_indexer.get_stats()}")
+            except Exception as e:
+                logger.warning(f"Failed to initialize BM25 indexer: {e}")
+                self._bm25_indexer = None
+        return self._bm25_indexer
 
     def retrieve(
         self,
@@ -83,11 +166,12 @@ class HybridRetriever:
             RetrievalResult with chunks and metadata
         """
         k = top_k or self.top_k
+        top_k_bm25 = config.retrieval.top_k_bm25
+        top_k_final = config.retrieval.top_k_final
 
-        # Generate query embedding
+        # Dense retrieval
         query_vector = self.embeddings.embed_query(query)
 
-        # Build filter conditions
         must_conditions = [
             FieldCondition(key="chunk_type", match=MatchValue(value=chunk_type))
         ]
@@ -104,8 +188,7 @@ class HybridRetriever:
 
         query_filter = Filter(must=must_conditions)
 
-        # Search Qdrant
-        results = qdrant_search(
+        dense_results = qdrant_search(
             client=self.client,
             collection_name=self.collection_name,
             query_vector=query_vector,
@@ -115,11 +198,10 @@ class HybridRetriever:
             with_vectors=False,
         )
 
-        # Format results
-        chunks = []
-        for hit in results:
+        dense_chunks = []
+        for hit in dense_results:
             payload = hit.payload
-            chunks.append({
+            dense_chunks.append({
                 "score": hit.score,
                 "chunk_id": payload.get("chunk_id"),
                 "paper_id": payload.get("paper_id"),
@@ -132,13 +214,57 @@ class HybridRetriever:
                 "token_count": payload.get("token_count"),
             })
 
-        logger.info(f"Retrieved {len(chunks)} {chunk_type} chunks for query: {query[:50]}...")
+        # BM25 retrieval (if enabled and index available)
+        bm25_chunks = []
+        if self.hybrid_enabled and self.bm25_indexer:
+            try:
+                bm25_results = self.bm25_indexer.search(query, top_k=top_k_bm25)
+                for r in bm25_results:
+                    bm25_chunks.append({
+                        "score": r.get("score", 0.0),
+                        "chunk_id": r.get("chunk_id"),
+                        "paper_id": r.get("paper_id"),
+                        "title": r.get("title"),
+                        "section": r.get("section"),
+                        "chunk_type": r.get("chunk_type"),
+                        "text": "",  # BM25 index doesn't store full text
+                        "parent_id": r.get("parent_id"),
+                        "chunk_index": r.get("chunk_index"),
+                        "token_count": r.get("token_count"),
+                    })
+            except Exception as e:
+                logger.warning(f"BM25 search failed: {e}")
+
+        # Fuse results
+        if bm25_chunks and dense_chunks:
+            fused_chunks = _rrf_fuse(dense_chunks, bm25_chunks, top_k_final)
+            strategy = "hybrid_rrf"
+        elif dense_chunks:
+            fused_chunks = dense_chunks[:top_k_final]
+            strategy = "dense"
+        elif bm25_chunks:
+            fused_chunks = bm25_chunks[:top_k_final]
+            strategy = "bm25"
+        else:
+            fused_chunks = []
+            strategy = "empty"
+
+        # If BM25 chunks were used, we may need to hydrate text from dense results
+        # or fetch from Qdrant for BM25-only results
+        for chunk in fused_chunks:
+            if not chunk.get("text") and chunk.get("chunk_id"):
+                # Try to find in dense chunks
+                dense_match = next((c for c in dense_chunks if c.get("chunk_id") == chunk["chunk_id"]), None)
+                if dense_match:
+                    chunk["text"] = dense_match.get("text", "")
+
+        logger.info(f"Retrieved {len(fused_chunks)} chunks ({strategy}) for query: {query[:50]}...")
 
         return RetrievalResult(
-            chunks=chunks,
+            chunks=fused_chunks,
             query=query,
-            strategy="dense",
-            total_found=len(chunks),
+            strategy=strategy,
+            total_found=len(fused_chunks),
         )
 
     def retrieve_multi_type(
@@ -149,7 +275,7 @@ class HybridRetriever:
         paper_id: Optional[str] = None,
     ) -> RetrievalResult:
         """
-        Retrieve across multiple chunk types.
+        Retrieve across multiple chunk types with BM25+RRF fusion.
 
         Args:
             query: Search query text
@@ -164,6 +290,9 @@ class HybridRetriever:
             chunk_types = ["child", "abstract"]
 
         k = top_k or self.top_k
+        top_k_bm25 = config.retrieval.top_k_bm25
+        top_k_final = config.retrieval.top_k_final
+
         query_vector = self.embeddings.embed_query(query)
 
         must_conditions = []
@@ -181,7 +310,7 @@ class HybridRetriever:
 
         query_filter = Filter(must=must_conditions) if must_conditions else None
 
-        results = qdrant_search(
+        dense_results = qdrant_search(
             client=self.client,
             collection_name=self.collection_name,
             query_vector=query_vector,
@@ -191,10 +320,10 @@ class HybridRetriever:
             with_vectors=False,
         )
 
-        chunks = []
-        for hit in results:
+        dense_chunks = []
+        for hit in dense_results:
             payload = hit.payload
-            chunks.append({
+            dense_chunks.append({
                 "score": hit.score,
                 "chunk_id": payload.get("chunk_id"),
                 "paper_id": payload.get("paper_id"),
@@ -207,13 +336,55 @@ class HybridRetriever:
                 "token_count": payload.get("token_count"),
             })
 
-        logger.info(f"Retrieved {len(chunks)} chunks ({', '.join(chunk_types)}) for query: {query[:50]}...")
+        # BM25 retrieval (if enabled and index available)
+        bm25_chunks = []
+        if self.hybrid_enabled and self.bm25_indexer:
+            try:
+                bm25_results = self.bm25_indexer.search(query, top_k=top_k_bm25)
+                for r in bm25_results:
+                    bm25_chunks.append({
+                        "score": r.get("score", 0.0),
+                        "chunk_id": r.get("chunk_id"),
+                        "paper_id": r.get("paper_id"),
+                        "title": r.get("title"),
+                        "section": r.get("section"),
+                        "chunk_type": r.get("chunk_type"),
+                        "text": "",
+                        "parent_id": r.get("parent_id"),
+                        "chunk_index": r.get("chunk_index"),
+                        "token_count": r.get("token_count"),
+                    })
+            except Exception as e:
+                logger.warning(f"BM25 search failed: {e}")
+
+        # Fuse results
+        if bm25_chunks and dense_chunks:
+            fused_chunks = _rrf_fuse(dense_chunks, bm25_chunks, top_k_final)
+            strategy = "hybrid_rrf"
+        elif dense_chunks:
+            fused_chunks = dense_chunks[:top_k_final]
+            strategy = "dense"
+        elif bm25_chunks:
+            fused_chunks = bm25_chunks[:top_k_final]
+            strategy = "bm25"
+        else:
+            fused_chunks = []
+            strategy = "empty"
+
+        # Hydrate text for BM25-only results
+        for chunk in fused_chunks:
+            if not chunk.get("text") and chunk.get("chunk_id"):
+                dense_match = next((c for c in dense_chunks if c.get("chunk_id") == chunk["chunk_id"]), None)
+                if dense_match:
+                    chunk["text"] = dense_match.get("text", "")
+
+        logger.info(f"Retrieved {len(fused_chunks)} chunks ({strategy}) for query: {query[:50]}...")
 
         return RetrievalResult(
-            chunks=chunks,
+            chunks=fused_chunks,
             query=query,
-            strategy="dense_multi",
-            total_found=len(chunks),
+            strategy=strategy,
+            total_found=len(fused_chunks),
         )
 
     def get_parent_chunk(self, parent_chunk_id: str) -> Optional[Dict[str, Any]]:
@@ -227,8 +398,6 @@ class HybridRetriever:
             Parent chunk payload or None if not found
         """
         try:
-            # Search by payload chunk_id filter instead of point ID
-            # Parent chunks are stored with chunk_id in payload, point ID is UUID
             must_conditions = [
                 FieldCondition(key="chunk_id", match=MatchValue(value=parent_chunk_id)),
                 FieldCondition(key="chunk_type", match=MatchValue(value="parent")),
@@ -237,7 +406,7 @@ class HybridRetriever:
             results = qdrant_search(
                 client=self.client,
                 collection_name=self.collection_name,
-                query_vector=[0.0] * 768,  # dummy vector - filter does the work
+                query_vector=[0.0] * 768,
                 query_filter=Filter(must=must_conditions),
                 limit=1,
                 with_payload=True,
@@ -276,7 +445,6 @@ class HybridRetriever:
         Returns:
             List of chunks with parent chunks included (deduplicated)
         """
-        # Map parent_id -> list of child scores that reference it
         parent_to_child_scores: Dict[str, List[float]] = {}
         parent_ids = set()
 
@@ -289,17 +457,14 @@ class HybridRetriever:
                     parent_to_child_scores[pid] = []
                 parent_to_child_scores[pid].append(score)
 
-        # Fetch all unique parents
         parents = []
         for pid in parent_ids:
             parent = self.get_parent_chunk(pid)
             if parent:
-                # Assign parent the max score of triggering children
                 child_scores = parent_to_child_scores.get(pid, [0.0])
                 parent["score"] = max(child_scores)
                 parents.append(parent)
 
-        # Combine children and parents, deduplicate by chunk_id
         seen = set()
         combined = []
 
@@ -309,7 +474,6 @@ class HybridRetriever:
                 seen.add(cid)
                 combined.append(chunk)
 
-        # Sort by score (children have scores, parents now inherit max child score)
         combined.sort(key=lambda x: (x.get("score", 0), x.get("chunk_type") != "parent"), reverse=True)
 
         logger.info(f"Expanded {len(chunks)} children to {len(combined)} total chunks with {len(parents)} parents "
