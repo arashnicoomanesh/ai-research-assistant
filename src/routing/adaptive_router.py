@@ -15,6 +15,7 @@ import re
 from typing import Optional, Literal
 from dataclasses import dataclass
 from src.core.llm import OllamaLLM, get_llm
+from src.core.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -76,10 +77,13 @@ Classify the user's query into one of these strategies:
              "Evolution of RAG techniques in recent years"
 
 6. "multi_step" - Complex queries requiring multiple retrieval steps.
-   ...
+   Decomposes query into sub-questions, retrieves for each, then synthesizes.
+   Use for comparisons, multi-paper synthesis, complex multi-part questions.
+   Examples: "Compare BERT and GPT-3 architectures",
+             "What are the tradeoffs between dense and sparse attention?",
+             "How do RAG methods differ from standard fine-tuning?",
+             "Summarize the evolution from BERT to GPT-4"
 ```
-
-Wait, I need to be careful about the numbering. Let me just add a higher-priority note for graph_rag rather than renumbering everything.
 {
   "strategy": "no_retrieval|baseline|single_shot|multi_step|crag_raptor|graph_rag",
   "confidence": 0.0-1.0,
@@ -130,8 +134,8 @@ Classify this query and return the JSON structure."""
     ]
 
     RAPTOR_PATTERNS = [
-        r"\b(overview|trends?|evolution|timeline)\b.*\b(field|area|domain|paradigm)\b",
-        r"\b(summarize|survey)\b.*\b(field|area|domain)\b",
+        r"\b(overview|trends?|evolution|timeline)\b.*\b(field|area|domain|paradigm|papers?)\b",
+        r"\b(summarize|survey)\b.*\b(field|area|domain|papers?)\b",
         r"\b(key|main|important|significant) .* (developments?|advancements?|trends?)\b",
         r"\b(recent .* year|past .* year)\b.*\b(advancements?|progress|trends)\b",
     ]
@@ -175,6 +179,37 @@ Classify this query and return the JSON structure."""
         Returns:
             RoutingDecision with strategy and metadata
         """
+        # Check no_retrieval patterns on the ORIGINAL query first
+        # This ensures general knowledge questions are caught before other checks
+        if original_query is not None:
+            orig_lower = original_query.lower()
+            for pattern in self.NO_RETRIEVAL_PATTERNS:
+                if re.search(pattern, orig_lower):
+                    return RoutingDecision(
+                        strategy="no_retrieval",
+                        confidence=0.75,
+                        reasoning=f"Heuristic matched no_retrieval (general knowledge): {pattern}",
+                        query_type="general",
+                        use_raptor=False,
+                        use_graph=False,
+                    )
+
+        # Check comparison patterns on the ORIGINAL query FIRST (before definition)
+        # This ensures "compare X and Y", "X vs Y", "difference between X and Y" route to multi_step
+        if original_query is not None:
+            orig_lower = original_query.lower()
+            for pattern in self.MULTI_STEP_PATTERNS:
+                if re.search(pattern, orig_lower):
+                    # Comparison query -> multi_step
+                    return RoutingDecision(
+                        strategy="multi_step",
+                        confidence=0.85,  # Higher than LLM default to prevent override
+                        reasoning=f"Heuristic matched multi_step (comparison): {pattern}",
+                        query_type="comparison",
+                        use_raptor=False,
+                        use_graph=False,
+                    )
+
         # Check definition patterns on the ORIGINAL query before rewrite influence wins
         # This ensures "What is X?", "Define X", "Explain X" prefer single_shot
         # even after the query rewriter expands terms
