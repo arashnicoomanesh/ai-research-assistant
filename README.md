@@ -489,6 +489,13 @@ ai-research-assistant/
 
 Follow existing code style; add tests where applicable.
 
+### Running Tests
+
+```bash
+# Run smoke tests (no Ollama/Qdrant required)
+pytest -q
+```
+
 ---
 
 ## 📄 License

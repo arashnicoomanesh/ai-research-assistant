@@ -70,9 +70,8 @@ select = [
 ignore = [
     "E501",  # line too long (handled by formatter)
 ]
-per-file-ignores = {
-    "scripts/*.py" = ["E501"],
-}
+[tool.ruff.per-file-ignores]
+"scripts/__init__.py" = ["E501"]
 
 [tool.ruff.format]
 quote-style = "double"
