@@ -10,7 +10,7 @@ A local-first, framework-free RAG laboratory that implements Adaptive routing, C
 [![Qdrant](https://img.shields.io/badge/Qdrant-vector%20DB-blueviolet)](https://qdrant.tech/)
 [![Local-First](https://img.shields.io/badge/Privacy-Local--First-success)](https://github.com/arashnicoomanesh/ai-research-assistant)
 [![No LangChain](https://img.shields.io/badge/No-LangChain%2FLlamaIndex-informational)](https://github.com/arashnicoomanesh/ai-research-assistant)
-[![Version](https://img.shields.io/badge/Version-v0.3.0-blue)](https://github.com/arashnicoomanesh/ai-research-assistant/releases/tag/v0.3.0)
+[![Version](https://img.shields.io/badge/Version-v0.4.0-blue)](https://github.com/arashnicoomanesh/ai-research-assistant/releases/tag/v0.4.0)
 
 </div>
 
