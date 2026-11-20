@@ -128,6 +128,44 @@ Each run produces a JSON report at the `--output` path with this structure:
 
 ---
 
+## Gold Fields Used
+
+The evaluation harness (`scripts/run_eval.py`) reads the following gold fields from `data/eval/questions.jsonl` and computes three additional lexical/lab-grade metrics. These are **not** LLM-as-judge; they are deterministic string-based proxies.
+
+| Gold Field | Source | Purpose |
+|------------|--------|---------|
+| `expected_strategy` | `questions.jsonl` | Expected routing strategy for this question (e.g., `single_shot`, `crag_raptor`, `multi_step`). May be `null`. |
+| `must_cite` | `questions.jsonl` | Boolean: whether the question type requires citations in the answer. |
+| `reference_answer` | `questions.jsonl` | Optional short reference answer text for lexical overlap comparison. |
+
+### Derived Per-Question Metrics
+
+| Metric | Computation | Notes |
+|--------|-------------|-------|
+| `strategy_match` (bool \| null) | `strategy_match(predicted, expected)` — normalized equality (strips `cached_` prefix, case-insensitive). Returns `None` if `expected_strategy` is `null`. | Only computed when gold provides `expected_strategy`. |
+| `citation_ok` (bool \| null) | `citation_compliance(has_citation, must_cite)`. Returns `True` if `must_cite=true` and answer has citations; `False` if `must_cite=true` but no citations; `None` if `must_cite=false` (not applicable). | Only meaningful for `must_cite=true` questions. |
+| `lexical_overlap` (float 0..1) | Token Jaccard: `|tokens(answer) ∩ tokens(reference)| / |tokens(answer) ∪ tokens(reference)|`. Tokenization: lowercase, split on non-alphanumeric. Returns `0.0` if no `reference_answer`; `1.0` if both empty. | **Lexical proxy only** — correlates loosely with semantic equivalence, not a substitute for human judgment. |
+
+### Summary Aggregation (added to `summarize_metrics` output)
+
+| Summary Key | Definition | Denominator |
+|-------------|------------|-------------|
+| `strategy_match_rate` | Fraction of questions with `expected_strategy` where `strategy_match == True`. | Questions with non-null `expected_strategy`. |
+| `citation_ok_rate` | Fraction of `must_cite=true` questions where `citation_ok == True`. | Questions with `must_cite=true`. |
+| `avg_lexical_overlap` | Mean `lexical_overlap` across questions with non-empty `reference_answer`. | Questions with non-empty `reference_answer`. |
+
+These three rates are printed in the console summary and included in the JSON report (`summary` block). They are **lab-grade, lexical proxies** — not SOTA evaluation metrics. Do not cite as benchmark results.
+
+### Live Run Pickup
+
+When running a live evaluation:
+1. Place questions with `expected_strategy`, `must_cite`, `reference_answer` in `data/eval/questions.jsonl`.
+2. Run `python scripts/run_eval.py --limit N --output report.json`.
+3. The report will include per-question `strategy_match`, `citation_ok`, `lexical_overlap` and the three summary rates.
+4. No additional flags or code changes required.
+
+---
+
 ## Files Referenced
 
 - Eval runner: `scripts/run_eval.py`

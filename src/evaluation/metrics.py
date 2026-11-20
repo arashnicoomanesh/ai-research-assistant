@@ -9,8 +9,17 @@ Helper functions to compute/record evaluation data:
 - citation presence
 - retrieval success
 - optional LLM-as-judge score for answer quality
+- lexical overlap with reference answer (token Jaccard: |intersection| / |union|)
+- strategy match against expected_strategy
+- citation compliance for must_cite questions
+
+Lexical Overlap Formula:
+    token_overlap(answer, reference) = |tokens(answer) ∩ tokens(reference)| / |tokens(answer) ∪ tokens(reference)|
+    where tokens(text) = set(lowercase(text).split() on non-alphanumeric boundaries)
+    Returns 0.0 if reference is empty or None.
 """
 import json
+import re
 import time
 from typing import Any, Dict, List, Optional, OrderedDict
 from collections import OrderedDict
@@ -143,6 +152,92 @@ def has_citation(answer: str, sources: List[Dict[str, Any]]) -> bool:
     return False
 
 
+def _tokenize(text: str) -> set:
+    """
+    Tokenize text into lowercase alphanumeric tokens.
+
+    Args:
+        text: Input text
+
+    Returns:
+        Set of lowercase tokens split on non-alphanumeric boundaries
+    """
+    if not text:
+        return set()
+    # Split on non-alphanumeric, filter empty, lowercase
+    return {t for t in re.split(r'[^a-zA-Z0-9]+', text.lower()) if t}
+
+
+def lexical_overlap(answer: str, reference: Optional[str]) -> float:
+    """
+    Compute token Jaccard overlap between answer and reference answer.
+
+    Formula: |tokens(answer) ∩ tokens(reference)| / |tokens(answer) ∪ tokens(reference)|
+    Returns 0.0 if reference is empty or None (and answer is not also empty).
+    Returns 1.0 if both answer and reference are empty/None (trivial match).
+
+    Args:
+        answer: Generated answer text
+        reference: Reference/gold answer text (may be None)
+
+    Returns:
+        Float in [0.0, 1.0]
+    """
+    # Handle both empty/None case first
+    if not reference and not answer:
+        return 1.0
+    if not reference:
+        return 0.0
+    ans_tokens = _tokenize(answer)
+    ref_tokens = _tokenize(reference)
+    if not ans_tokens and not ref_tokens:
+        return 1.0
+    if not ans_tokens or not ref_tokens:
+        return 0.0
+    intersection = ans_tokens & ref_tokens
+    union = ans_tokens | ref_tokens
+    return len(intersection) / len(union)
+
+
+def strategy_match(predicted: Optional[str], expected: Optional[str]) -> Optional[bool]:
+    """
+    Check if predicted strategy matches expected strategy.
+
+    Args:
+        predicted: Strategy name from pipeline (e.g., 'crag_raptor')
+        expected: Expected strategy from gold (e.g., 'crag_raptor')
+
+    Returns:
+        True if match, False if both present and different, None if expected is None
+    """
+    if expected is None:
+        return None
+    if predicted is None:
+        return False
+    # Normalize: lowercase, strip prefixes like 'cached_'
+    pred_norm = predicted.lower().replace('cached_', '')
+    exp_norm = expected.lower().replace('cached_', '')
+    return pred_norm == exp_norm
+
+
+def citation_compliance(has_citation: bool, must_cite: bool) -> Optional[bool]:
+    """
+    Check citation compliance for must_cite questions.
+
+    Args:
+        has_citation: Whether the answer has citations
+        must_cite: Whether the question requires citations
+
+    Returns:
+        True if compliant (has citation when must_cite, or no requirement),
+        False if must_cite but no citation,
+        None if must_cite is False (not applicable)
+    """
+    if not must_cite:
+        return None
+    return has_citation
+
+
 def compute_faithfulness(faithful: bool, pipeline_metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Compute faithfulness metric from pipeline output.
@@ -195,6 +290,9 @@ def summarize_metrics(metrics_record: Dict[str, Any]) -> Dict[str, Any]:
                 "citation_rate": 0.0,
                 "retrieval_success_rate": 0.0,
                 "strategy_distribution": {},
+                "strategy_match_rate": 0.0,
+                "citation_ok_rate": 0.0,
+                "avg_lexical_overlap": 0.0,
             }
 
         latencies = [r.get("latency", 0.0) for r in results.values()]
@@ -218,6 +316,21 @@ def summarize_metrics(metrics_record: Dict[str, Any]) -> Dict[str, Any]:
         success_count = sum(1 for r in results.values() if r.get("retrieval_success", False))
         retrieval_success_rate = success_count / total if total else 0.0
 
+        # New gold-based metrics
+        # Strategy match rate: among questions with expected_strategy
+        strategy_match_results = [r.get("strategy_match") for r in results.values() if r.get("expected_strategy") is not None]
+        strategy_match_count = sum(1 for m in strategy_match_results if m is True)
+        strategy_match_rate = strategy_match_count / len(strategy_match_results) if strategy_match_results else 0.0
+
+        # Citation OK rate: among questions with must_cite=true
+        citation_ok_results = [r.get("citation_ok") for r in results.values() if r.get("must_cite") is True]
+        citation_ok_count = sum(1 for m in citation_ok_results if m is True)
+        citation_ok_rate = citation_ok_count / len(citation_ok_results) if citation_ok_results else 0.0
+
+        # Avg lexical overlap: among questions with non-empty reference_answer
+        lexical_overlaps = [r.get("lexical_overlap", 0.0) for r in results.values() if r.get("reference_answer")]
+        avg_lexical_overlap = sum(lexical_overlaps) / len(lexical_overlaps) if lexical_overlaps else 0.0
+
         summary = {
             "total_questions": total,
             "avg_latency": avg_latency,
@@ -226,6 +339,9 @@ def summarize_metrics(metrics_record: Dict[str, Any]) -> Dict[str, Any]:
             "citation_rate": citation_rate,
             "retrieval_success_rate": retrieval_success_rate,
             "strategy_distribution": strategy_distribution,
+            "strategy_match_rate": strategy_match_rate,
+            "citation_ok_rate": citation_ok_rate,
+            "avg_lexical_overlap": avg_lexical_overlap,
         }
 
     return {
@@ -236,4 +352,7 @@ def summarize_metrics(metrics_record: Dict[str, Any]) -> Dict[str, Any]:
         "citation_rate": summary.get("citation_rate", 0.0),
         "retrieval_success_rate": summary.get("retrieval_success_rate", 0.0),
         "strategy_distribution": summary.get("strategy_distribution", {}),
+        "strategy_match_rate": summary.get("strategy_match_rate", 0.0),
+        "citation_ok_rate": summary.get("citation_ok_rate", 0.0),
+        "avg_lexical_overlap": summary.get("avg_lexical_overlap", 0.0),
     }

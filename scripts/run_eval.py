@@ -39,6 +39,9 @@ from src.evaluation.metrics import (
     has_citation,
     compute_faithfulness,
     summarize_metrics,
+    lexical_overlap,
+    strategy_match,
+    citation_compliance,
 )
 
 logger = logging.getLogger("eval")
@@ -86,12 +89,16 @@ def run_single_question(
     question = question_data["question"]
     question_type = question_data["type"]
     must_cite = question_data.get("must_cite", False)
+    expected_strategy = question_data.get("expected_strategy")
+    reference_answer = question_data.get("reference_answer")
 
     result: Dict[str, Any] = {
         "question_id": question_id,
         "question": question,
         "type": question_type,
         "must_cite": must_cite,
+        "expected_strategy": expected_strategy,
+        "reference_answer": reference_answer,
         "strategy": None,
         "answer": "",
         "sources": [],
@@ -103,6 +110,9 @@ def run_single_question(
         "has_citation": False,
         "crag_metadata": None,
         "raptor_metadata": None,
+        "strategy_match": None,
+        "citation_ok": None,
+        "lexical_overlap": 0.0,
     }
 
     # Step 1: Check cache
@@ -118,6 +128,10 @@ def run_single_question(
         cite = has_citation(result["answer"], result["sources"])
         result["citation_present"] = cite
         result["has_citation"] = cite
+        # Compute gold-based metrics even for cache hits
+        result["strategy_match"] = strategy_match(result["strategy"], expected_strategy)
+        result["citation_ok"] = citation_compliance(cite, must_cite)
+        result["lexical_overlap"] = lexical_overlap(result["answer"], reference_answer)
         return result
 
     # Step 2: Run through pipeline
@@ -157,6 +171,11 @@ def run_single_question(
         result["sources"] = []
         result["strategy"] = "error"
         result["faithful"] = False
+
+    # Compute gold-based metrics
+    result["strategy_match"] = strategy_match(result["strategy"], expected_strategy)
+    result["citation_ok"] = citation_compliance(result["has_citation"], must_cite)
+    result["lexical_overlap"] = lexical_overlap(result["answer"], reference_answer)
 
     return result
 
@@ -271,6 +290,11 @@ def print_summary(overall_results: Dict[str, Any]) -> None:
     print(f"Citation rate: {summary.get('citation_rate', 0.0):.1%}")
     print(f"Retrieval success rate: {summary.get('retrieval_success_rate', 0.0):.1%}")
 
+    # Gold-based metrics
+    print(f"Strategy match rate: {summary.get('strategy_match_rate', 0.0):.1%}")
+    print(f"Citation OK rate: {summary.get('citation_ok_rate', 0.0):.1%}")
+    print(f"Avg lexical overlap: {summary.get('avg_lexical_overlap', 0.0):.3f}")
+
     print(f"\nStrategy distribution:")
     for strategy, rate in summary.get("strategy_distribution", {}).items():
         print(f"  {strategy}: {rate:.1%}")
@@ -280,7 +304,10 @@ def print_summary(overall_results: Dict[str, Any]) -> None:
         print(f"  {qid}: strategy={result.get('strategy', 'N/A')}, "
               f"latency={result.get('latency', 0):.2f}s, "
               f"cache_hit={result.get('cache_hit', False)}, "
-              f"faithful={result.get('faithful', False)}")
+              f"faithful={result.get('faithful', False)}, "
+              f"strategy_match={result.get('strategy_match', 'N/A')}, "
+              f"citation_ok={result.get('citation_ok', 'N/A')}, "
+              f"lexical_overlap={result.get('lexical_overlap', 0.0):.3f}")
 
     print("\n" + "=" * 60)
 
