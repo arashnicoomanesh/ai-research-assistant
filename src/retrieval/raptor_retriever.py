@@ -9,6 +9,7 @@ Constraints:
 - Fully local, no LangChain / LlamaIndex
 - Reuse existing embeddings + Qdrant client patterns
 - Return mixed evidence (summaries + supporting detailed chunks)
+- RAPTOR-inspired: limited hierarchy / summary layers, not full recursive clustering tree
 """
 import logging
 from typing import List, Dict, Any, Optional, Tuple
@@ -22,6 +23,11 @@ from qdrant_client.models import Filter, FieldCondition, MatchValue
 from src.retrieval.qdrant_search import qdrant_search
 
 logger = logging.getLogger(__name__)
+
+# RAPTOR-inspired config constants (not full RAPTOR tree)
+DEFAULT_K_SUMMARY = 5
+DEFAULT_K_DETAIL_PER_SUMMARY = 3
+MAX_DETAIL_CHUNKS_TOTAL = 10
 
 
 @dataclass
@@ -89,15 +95,15 @@ class RaptorRetriever:
         query_lower = query.lower()
         survey_count = sum(1 for pattern in survey_patterns if __import__('re').search(pattern, query_lower))
 
-        # If 2+ survey patterns match, treat as survey query
-        return survey_count >= 2
+        # If 1+ survey patterns match, treat as survey query
+        return survey_count >= 1
 
     def retrieve(
         self,
         query: str,
         paper_id: Optional[str] = None,
-        k_summary: int = 5,
-        k_detail: int = 10,
+        k_summary: int = DEFAULT_K_SUMMARY,
+        k_detail: int = MAX_DETAIL_CHUNKS_TOTAL,
     ) -> RaptorRetrievalResult:
         """
         Perform RAPTOR-enhanced retrieval.
@@ -105,8 +111,8 @@ class RaptorRetriever:
         Args:
             query: User query
             paper_id: Optional filter for a specific paper
-            k_summary: Number of summary nodes to retrieve
-            k_detail: Number of child chunks to retrieve
+            k_summary: Number of summary nodes to retrieve (by query similarity)
+            k_detail: Maximum total detail chunks to retrieve
 
         Returns:
             RaptorRetrievalResult with mixed evidence
@@ -117,13 +123,13 @@ class RaptorRetriever:
 
         logger.info(f"RAPTOR retrieval: query_type={query_type}, paper_id={paper_id}")
 
-        # Step 2: Retrieve summary nodes
-        summary_nodes = self._retrieve_summaries(paper_id, k_summary)
+        # Step 2: Retrieve summary nodes ranked by query similarity
+        summary_nodes = self._retrieve_summaries(query, paper_id, k_summary)
 
         # Step 3: Retrieve detail chunks
         detail_chunks = self._retrieve_details(query, paper_id, k_detail)
 
-        # Step 4: Combine and deduplicate
+        # Step 4: Combine and deduplicate with detail budget per summary
         combined_chunks = self._combine_evidence(summary_nodes, detail_chunks, is_survey)
 
         # Step 5: Build stats
@@ -151,34 +157,66 @@ class RaptorRetriever:
 
     def _retrieve_summaries(
         self,
+        query: str,
         paper_id: Optional[str],
         k: int,
     ) -> List[RaptorNode]:
         """
-        Retrieve RAPTOR summary nodes from Qdrant.
+        Retrieve RAPTOR summary nodes from Qdrant ranked by query similarity.
 
         Args:
+            query: User query for similarity search
             paper_id: Optional filter
             k: Number of summaries to retrieve
 
         Returns:
-            List of RaptorNode summary objects
+            List of RaptorNode summary objects ranked by embedding similarity
         """
-        builder = self.raptor_builder
+        # Embed the query
+        query_vector = self.embeddings.embed_query(query)
 
-        # Get summary nodes
-        nodes = builder.get_summary_nodes(
-            paper_id=paper_id,
-            level=None,  # Get all levels
+        # Build filter for summary nodes
+        must_conditions = [
+            FieldCondition(key="chunk_type", match=MatchValue(value="summary"))
+        ]
+
+        if paper_id:
+            must_conditions.append(FieldCondition(key="paper_id", match=MatchValue(value=paper_id)))
+
+        query_filter = Filter(must=must_conditions)
+
+        # Search summary nodes by vector similarity
+        results = qdrant_search(
+            client=self.retriever.client,
+            collection_name=config.qdrant.collection,
+            query_vector=query_vector,
+            query_filter=query_filter,
+            limit=k,
+            with_payload=True,
+            with_vectors=True,
         )
 
-        # Filter to only summary nodes and sort - in a real implementation,
-        # we'd use vector similarity. For now, return what's available.
-        # Sort by level (prefer section-level 1, then paper-level 2)
-        nodes.sort(key=lambda n: n.level)
+        # Convert to RaptorNode objects
+        nodes = []
+        for hit in results:
+            payload = hit.payload
+            if payload.get("chunk_type") == "summary":
+                node = RaptorNode(
+                    chunk_id=payload.get("chunk_id", ""),
+                    paper_id=payload.get("paper_id", ""),
+                    title=payload.get("title", ""),
+                    section=payload.get("section", ""),
+                    level=payload.get("level", 1),
+                    chunk_type=payload.get("chunk_type", ""),
+                    summary=payload.get("summary", ""),
+                    source_chunk_ids=payload.get("source_chunk_ids", []),
+                    metadata=payload.get("metadata", {}),
+                    embedding=hit.vector if hit.vector else None,
+                )
+                nodes.append(node)
 
-        # Return top k
-        return nodes[:k]
+        logger.debug(f"Retrieved {len(nodes)} summary nodes by query similarity")
+        return nodes
 
     def _retrieve_details(
         self,
@@ -230,12 +268,15 @@ class RaptorRetriever:
         """
         Combine summary nodes and detail chunks into deduplicated evidence.
 
-        For survey queries: prioritize summaries, then add details.
+        For survey queries: prioritize summaries, then add details linked to each summary.
         For detail queries: prioritize details, optionally include summaries.
 
+        Each selected summary gets at most DEFAULT_K_DETAIL_PER_SUMMARY detail chunks
+        from its source_chunk_ids, respecting a total budget of MAX_DETAIL_CHUNKS_TOTAL.
+
         Args:
-            summary_nodes: RAPTOR summary nodes
-            detail_chunks: Detailed child chunks
+            summary_nodes: RAPTOR summary nodes (already ranked by query similarity)
+            detail_chunks: Detailed child chunks (ranked by query similarity)
             is_survey: Whether this is a survey query
 
         Returns:
@@ -244,41 +285,54 @@ class RaptorRetriever:
         combined: List[Dict[str, Any]] = []
         seen_ids: set = set()
 
-        if is_survey:
-            # Survey mode: start with summaries, then add detail chunks
-            # that reference or extend the summaries
+        # Build lookup for detail chunks by chunk_id for fast access
+        detail_by_id = {chunk.get("chunk_id", ""): chunk for chunk in detail_chunks}
 
-            # Add summary nodes first
+        if is_survey:
+            # Survey mode: start with summaries, then attach detail chunks per summary
+            total_details_added = 0
+
             for node in summary_nodes:
                 chunk_id = node.chunk_id
                 if chunk_id not in seen_ids:
                     seen_ids.add(chunk_id)
                     combined.append({
-                        **{k: v for k, v in node.__dict__.items() if k != "_state"},
+                        **{k: v for k, v in node.__dict__.items() if k not in ("_state", "embedding")},
                         "text": node.summary,  # Map summary to text field for generator
                         "_raptor_node": True,
                         "summary_level": node.level,
                     })
 
-            # Add detail chunks that complement the summaries
-            for chunk in detail_chunks:
-                chunk_id = chunk.get("chunk_id", "")
-                if chunk_id not in seen_ids:
-                    # Check if this chunk belongs to a paper we have summaries for
-                    paper_id = chunk.get("paper_id", "")
-                    summary_papers = set(n.paper_id for n in summary_nodes)
-                    if paper_id in summary_papers or not summary_papers:
-                        seen_ids.add(chunk_id)
-                        combined.append(chunk)
+                # Attach detail chunks linked to this summary (via source_chunk_ids)
+                # Up to DEFAULT_K_DETAIL_PER_SUMMARY per summary, respecting total budget
+                if total_details_added < MAX_DETAIL_CHUNKS_TOTAL:
+                    source_ids = node.source_chunk_ids or []
+                    added_for_this_summary = 0
+                    for sid in source_ids:
+                        if total_details_added >= MAX_DETAIL_CHUNKS_TOTAL:
+                            break
+                        if added_for_this_summary >= DEFAULT_K_DETAIL_PER_SUMMARY:
+                            break
+                        if sid in detail_by_id and sid not in seen_ids:
+                            seen_ids.add(sid)
+                            combined.append(detail_by_id[sid])
+                            total_details_added += 1
+                            added_for_this_summary += 1
+
+            # Note: We do NOT add additional detail chunks beyond the per-summary budget
+            # to strictly respect MAX_DETAIL_CHUNKS_TOTAL and keep context bounded.
 
         else:
-            # Detail mode: start with details, add summaries as overviews
-            # Add detail chunks first
+            # Detail mode: start with details (up to MAX_DETAIL_CHUNKS_TOTAL), add summaries as overviews
+            details_added = 0
             for chunk in detail_chunks:
+                if details_added >= MAX_DETAIL_CHUNKS_TOTAL:
+                    break
                 chunk_id = chunk.get("chunk_id", "")
                 if chunk_id not in seen_ids:
                     seen_ids.add(chunk_id)
                     combined.append(chunk)
+                    details_added += 1
 
             # Add summary nodes as supplementary overviews
             for node in summary_nodes:
@@ -286,7 +340,7 @@ class RaptorRetriever:
                 if chunk_id not in seen_ids:
                     seen_ids.add(chunk_id)
                     combined.append({
-                        **{k: v for k, v in node.__dict__.items() if k != "_state"},
+                        **{k: v for k, v in node.__dict__.items() if k not in ("_state", "embedding")},
                         "text": node.summary,  # Map summary to text field for generator
                         "_raptor_node": True,
                         "summary_level": node.level,

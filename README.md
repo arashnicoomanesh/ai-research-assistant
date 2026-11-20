@@ -359,6 +359,8 @@ python scripts/build_raptor.py --check          # Inspect existing
 python scripts/build_raptor.py --all --limit 3  # Cap groups
 ```
 
+> **Note:** This is a RAPTOR-inspired implementation with limited hierarchy (section-level and paper-level summaries only), not a full recursive RAPTOR clustering tree.
+
 ### 🕸️ Build GraphRAG Knowledge Graph
 ```bash
 # Recommended: abstracts-first (CPU-friendly)
