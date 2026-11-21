@@ -508,6 +508,15 @@ Follow existing code style; add tests where applicable.
 pytest -q
 ```
 
+### Type Checking
+
+```bash
+# Run mypy on core packages (src/core, src/routing)
+mypy src/core src/routing
+```
+
+Uses `ignore_missing_imports = true` for third-party libs without stubs.
+
 ---
 
 ## 📄 License

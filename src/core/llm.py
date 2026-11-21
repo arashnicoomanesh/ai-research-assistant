@@ -7,7 +7,7 @@ Supports streaming and non-streaming responses with proper error handling.
 import json
 import logging
 import threading
-from typing import Optional, Iterator, List, Dict, Any
+from typing import Any, Dict, Iterator, List, Optional, Union
 import requests
 from src.core.config import config
 
@@ -85,7 +85,7 @@ class OllamaLLM:
         if stream:
             return "".join(self.generate_stream(prompt, system_prompt, temperature, max_tokens, **kwargs))
 
-        payload = {
+        payload: Dict[str, Any] = {
             "model": self.model,
             "prompt": prompt,
             "stream": False,
@@ -105,7 +105,8 @@ class OllamaLLM:
             timeout=self.timeout
         )
         response.raise_for_status()
-        return response.json().get("response", "").strip()
+        data: Dict[str, Any] = response.json()
+        return str(data.get("response", ""))
 
     def generate_stream(
         self,
@@ -128,7 +129,7 @@ class OllamaLLM:
         Yields:
             Text chunks as they are generated
         """
-        payload = {
+        payload: Dict[str, Any] = {
             "model": self.model,
             "prompt": prompt,
             "stream": True,
@@ -183,7 +184,7 @@ class OllamaLLM:
         if stream:
             return "".join(self.chat_stream(messages, temperature, max_tokens, **kwargs))
 
-        payload = {
+        payload: Dict[str, Any] = {
             "model": self.model,
             "messages": messages,
             "stream": False,
@@ -200,7 +201,8 @@ class OllamaLLM:
             timeout=self.timeout
         )
         response.raise_for_status()
-        return response.json().get("message", {}).get("content", "").strip()
+        data: Dict[str, Any] = response.json()
+        return str(data.get("message", {}).get("content", ""))
 
     def chat_stream(
         self,
@@ -221,7 +223,7 @@ class OllamaLLM:
         Yields:
             Text chunks
         """
-        payload = {
+        payload: Dict[str, Any] = {
             "model": self.model,
             "messages": messages,
             "stream": True,
@@ -262,7 +264,8 @@ class OllamaLLM:
         try:
             response = self._get_session().get(f"{self.host}/api/tags", timeout=10)
             response.raise_for_status()
-            return [m["name"] for m in response.json().get("models", [])]
+            data: Dict[str, Any] = response.json()
+            return [m["name"] for m in data.get("models", [])]
         except requests.RequestException:
             return []
 

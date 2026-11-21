@@ -8,7 +8,7 @@ import logging
 import threading
 import time
 from collections import OrderedDict
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Union
 import requests
 import numpy as np
 from requests.exceptions import RequestException, Timeout
@@ -194,11 +194,11 @@ class OllamaEmbeddings:
                 logger.debug(f"Batch {batch_num}: cache hit for single query")
                 return [cached]
 
-        last_exception = None
+        last_exception: Optional[BaseException] = None
         
         for attempt in range(1, self.max_retries + 1):
             try:
-                payload = {
+                payload: Dict[str, Any] = {
                     "model": self.model,
                     "input": texts
                 }
@@ -211,7 +211,8 @@ class OllamaEmbeddings:
                 )
                 response.raise_for_status()
 
-                embeddings = response.json().get("embeddings", [])
+                data: Dict[str, Any] = response.json()
+                embeddings: List[List[float]] = data.get("embeddings", [])
                 
                 if len(embeddings) != len(texts):
                     raise ValueError(f"Expected {len(texts)} embeddings, got {len(embeddings)}")
@@ -247,7 +248,9 @@ class OllamaEmbeddings:
 
         # All retries exhausted
         logger.error(f"Batch {batch_num} failed after {self.max_retries} attempts. Last error: {last_exception}")
-        raise last_exception
+        if last_exception:
+            raise last_exception
+        raise RuntimeError("All retries exhausted with no exception captured")
 
     def embed_query(self, query: str) -> List[float]:
         """
@@ -296,7 +299,8 @@ class OllamaEmbeddings:
             response = self._get_session().get(f"{self.host}/api/tags", timeout=5)
             if response.status_code != 200:
                 return False
-            models = [m["name"] for m in response.json().get("models", [])]
+            data: Dict[str, Any] = response.json()
+            models = [m["name"] for m in data.get("models", [])]
             return any(self.model in m for m in models)
         except requests.RequestException:
             return False
