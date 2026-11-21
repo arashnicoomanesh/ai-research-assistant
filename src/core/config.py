@@ -48,6 +48,13 @@ class RetrievalConfig:
     hybrid_enabled: bool = os.getenv("HYBRID_ENABLED", "true").lower() == "true"
     rerank_enabled: bool = os.getenv("RERANK_ENABLED", "false").lower() == "true"
     rerank_model: str = os.getenv("RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
+    rrf_k: int = int(os.getenv("RRF_K", "60"))
+    sludge_min_letter_ratio: float = float(os.getenv("SLUDGE_MIN_LETTER_RATIO", "0.30"))
+    sludge_max_digit_ratio: float = float(os.getenv("SLUDGE_MAX_DIGIT_RATIO", "0.50"))
+    sludge_max_punct_ratio: float = float(os.getenv("SLUDGE_MAX_PUNCT_RATIO", "0.40"))
+    sludge_min_words: int = int(os.getenv("SLUDGE_MIN_WORDS", "5"))
+    sludge_min_alpha_words: int = int(os.getenv("SLUDGE_MIN_ALPHA_WORDS", "2"))
+    sludge_max_glued_ratio: float = float(os.getenv("SLUDGE_MAX_GLUED_RATIO", "0.05"))
 
 
 @dataclass
@@ -57,6 +64,7 @@ class EmbeddingConfig:
     timeout_seconds: int = int(os.getenv("EMBED_TIMEOUT_SECONDS", "300"))
     max_retries: int = int(os.getenv("EMBED_MAX_RETRIES", "2"))
     embed_parents: bool = os.getenv("EMBED_PARENTS", "false").lower() == "true"
+    query_cache_max_size: int = int(os.getenv("EMBED_QUERY_CACHE_MAX_SIZE", "256"))
 
 
 @dataclass
@@ -71,6 +79,7 @@ class CacheConfig:
     """Semantic cache configuration."""
     path: str = os.getenv("CACHE_PATH", "data/cache/semantic_cache.json")
     similarity_threshold: float = float(os.getenv("CACHE_SIMILARITY_THRESHOLD", "0.92"))
+    duplicate_threshold: float = float(os.getenv("CACHE_DUPLICATE_THRESHOLD", "0.98"))
     max_entries: int = int(os.getenv("CACHE_MAX_ENTRIES", "1000"))
     ttl_seconds: int = int(os.getenv("CACHE_TTL_SECONDS", "0"))  # 0 = no TTL
 
@@ -115,6 +124,26 @@ class GraphConfig:
     max_relations_per_text: int = int(os.getenv("GRAPH_MAX_RELATIONS_PER_TEXT", "8"))
     supporting_chunks: int = int(os.getenv("GRAPH_SUPPORTING_CHUNKS", "3"))
     build_source: str = os.getenv("GRAPH_BUILD_SOURCE", "abstract_first")
+    entity_extract_max_chars: int = int(os.getenv("GRAPH_ENTITY_EXTRACT_MAX_CHARS", "900"))
+    entity_extract_fallback_chars: int = int(os.getenv("GRAPH_ENTITY_EXTRACT_FALLBACK_CHARS", "600"))
+
+
+@dataclass
+class RaptorConfig:
+    """RAPTOR retrieval and builder configuration."""
+    k_summary: int = int(os.getenv("RAPTOR_K_SUMMARY", "5"))
+    k_detail_per_summary: int = int(os.getenv("RAPTOR_K_DETAIL_PER_SUMMARY", "3"))
+    max_detail_chunks_total: int = int(os.getenv("RAPTOR_MAX_DETAIL_CHUNKS_TOTAL", "10"))
+    builder_max_tokens: int = int(os.getenv("RAPTOR_BUILDER_MAX_TOKENS", "256"))
+    builder_batch_size: int = int(os.getenv("RAPTOR_BUILDER_BATCH_SIZE", "16"))
+    builder_max_chunks_per_group: int = int(os.getenv("RAPTOR_BUILDER_MAX_CHUNKS_PER_GROUP", "20"))
+
+
+@dataclass
+class MultiStepConfig:
+    """Multi-step retrieval configuration."""
+    max_sub_questions: int = int(os.getenv("MULTI_STEP_MAX_SUB_QUESTIONS", "3"))
+    max_follow_up: int = int(os.getenv("MULTI_STEP_MAX_FOLLOW_UP", "1"))
 
 
 @dataclass
@@ -130,6 +159,8 @@ class Config:
     cpu_safe: CPUSafeConfig = field(default_factory=CPUSafeConfig)
     paths: PathsConfig = field(default_factory=PathsConfig)
     graph: GraphConfig = field(default_factory=GraphConfig)
+    raptor: RaptorConfig = field(default_factory=RaptorConfig)
+    multi_step: MultiStepConfig = field(default_factory=MultiStepConfig)
 
 
 # Global config instance

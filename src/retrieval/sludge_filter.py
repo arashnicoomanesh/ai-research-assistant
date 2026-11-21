@@ -7,18 +7,26 @@ before they reach the answer generator. Uses cheap heuristics only.
 import logging
 import re
 from typing import List, Dict, Any, Optional
+from src.core.config import get_config
 
 logger = logging.getLogger(__name__)
 
-# Default thresholds (can be overridden via config or constants)
-MIN_LETTER_RATIO = 0.30  # letters / max(len(text), 1)
-MAX_DIGIT_RATIO = 0.50   # digits / max(len(text), 1)
-MAX_PUNCT_RATIO = 0.40   # punctuation / max(len(text), 1)
-MIN_WORDS = 5            # minimum words to be considered valid prose
-MIN_ALPHA_WORDS = 2      # minimum alphabetic words
 
 # Pattern for glued tokens (e.g., "ThisIsAGluedToken" or "word1word2word3")
 GLUED_TOKEN_PATTERN = re.compile(r'[a-z][A-Z]|[a-zA-Z]\d|\d[a-zA-Z]')
+
+
+def _get_sludge_defaults() -> dict:
+    """Get sludge filter thresholds from config."""
+    cfg = get_config().retrieval
+    return {
+        "min_letter_ratio": cfg.sludge_min_letter_ratio,
+        "max_digit_ratio": cfg.sludge_max_digit_ratio,
+        "max_punct_ratio": cfg.sludge_max_punct_ratio,
+        "min_words": cfg.sludge_min_words,
+        "min_alpha_words": cfg.sludge_min_alpha_words,
+        "max_glued_ratio": cfg.sludge_max_glued_ratio,
+    }
 
 
 def _count_letters(text: str) -> int:
@@ -50,27 +58,35 @@ def _glued_token_ratio(text: str) -> float:
 
 
 def is_sludge(text: str,
-              min_letter_ratio: float = MIN_LETTER_RATIO,
-              max_digit_ratio: float = MAX_DIGIT_RATIO,
-              max_punct_ratio: float = MAX_PUNCT_RATIO,
-              min_words: int = MIN_WORDS,
-              min_alpha_words: int = MIN_ALPHA_WORDS,
-              max_glued_ratio: float = 0.05) -> bool:
+              min_letter_ratio: Optional[float] = None,
+              max_digit_ratio: Optional[float] = None,
+              max_punct_ratio: Optional[float] = None,
+              min_words: Optional[int] = None,
+              min_alpha_words: Optional[int] = None,
+              max_glued_ratio: Optional[float] = None) -> bool:
     """
     Determine if a text chunk is 'sludge' (low quality, table dump, OCR noise).
 
     Args:
         text: Chunk text to evaluate
-        min_letter_ratio: Minimum ratio of alphabetic characters
-        max_digit_ratio: Maximum ratio of digits
-        max_punct_ratio: Maximum ratio of punctuation
-        min_words: Minimum word count
-        min_alpha_words: Minimum words containing letters
-        max_glued_ratio: Maximum ratio of glued-token transitions
+        min_letter_ratio: Minimum ratio of alphabetic characters (default from config)
+        max_digit_ratio: Maximum ratio of digits (default from config)
+        max_punct_ratio: Maximum ratio of punctuation (default from config)
+        min_words: Minimum word count (default from config)
+        min_alpha_words: Minimum words containing letters (default from config)
+        max_glued_ratio: Maximum ratio of glued-token transitions (default from config)
 
     Returns:
         True if chunk should be filtered out
     """
+    defaults = _get_sludge_defaults()
+    min_letter_ratio = min_letter_ratio if min_letter_ratio is not None else defaults["min_letter_ratio"]
+    max_digit_ratio = max_digit_ratio if max_digit_ratio is not None else defaults["max_digit_ratio"]
+    max_punct_ratio = max_punct_ratio if max_punct_ratio is not None else defaults["max_punct_ratio"]
+    min_words = min_words if min_words is not None else defaults["min_words"]
+    min_alpha_words = min_alpha_words if min_alpha_words is not None else defaults["min_alpha_words"]
+    max_glued_ratio = max_glued_ratio if max_glued_ratio is not None else defaults["max_glued_ratio"]
+
     if not text or not text.strip():
         return True
 

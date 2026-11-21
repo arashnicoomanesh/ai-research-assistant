@@ -17,10 +17,8 @@ from src.ingestion.raptor_types import RaptorNode
 from src.retrieval.raptor_retriever import (
     RaptorRetriever,
     RaptorRetrievalResult,
-    DEFAULT_K_SUMMARY,
-    DEFAULT_K_DETAIL_PER_SUMMARY,
-    MAX_DETAIL_CHUNKS_TOTAL,
 )
+from src.core.config import get_config
 
 
 @dataclass
@@ -175,7 +173,7 @@ class TestRaptorInspiredRetrieval:
             assert "transformer" in result.summary_nodes[0].summary.lower()
 
     def test_detail_budget_per_summary_respected(self):
-        """Each summary should get at most DEFAULT_K_DETAIL_PER_SUMMARY detail chunks."""
+        """Each summary should get at most k_detail_per_summary detail chunks."""
         # Create a summary with 5 source chunks
         summary = create_summary_node(
             chunk_id="sum_1",
@@ -210,12 +208,13 @@ class TestRaptorInspiredRetrieval:
             # Count detail chunks attached to the summary in combined_chunks
             detail_count = sum(1 for c in result.combined_chunks if c.get("chunk_type") == "child")
 
-            # Should respect DEFAULT_K_DETAIL_PER_SUMMARY (3) per summary
-            assert detail_count <= DEFAULT_K_DETAIL_PER_SUMMARY
-            assert detail_count == DEFAULT_K_DETAIL_PER_SUMMARY
+            # Should respect k_detail_per_summary (3) per summary
+            k_detail_per_summary = get_config().raptor.k_detail_per_summary
+            assert detail_count <= k_detail_per_summary
+            assert detail_count == k_detail_per_summary
 
     def test_total_detail_budget_respected(self):
-        """Total detail chunks across all summaries should not exceed MAX_DETAIL_CHUNKS_TOTAL."""
+        """Total detail chunks across all summaries should not exceed max_detail_chunks_total."""
         # Create 4 summaries each with 3 source chunks (12 total potential)
         summaries = []
         all_source_ids = []
@@ -255,9 +254,10 @@ class TestRaptorInspiredRetrieval:
             # Count detail chunks in combined_chunks
             detail_count = sum(1 for c in result.combined_chunks if c.get("chunk_type") == "child")
 
-            # Should respect MAX_DETAIL_CHUNKS_TOTAL (10)
-            assert detail_count <= MAX_DETAIL_CHUNKS_TOTAL
-            assert detail_count == MAX_DETAIL_CHUNKS_TOTAL
+            # Should respect max_detail_chunks_total (10)
+            max_detail = get_config().raptor.max_detail_chunks_total
+            assert detail_count <= max_detail
+            assert detail_count == max_detail
 
     def test_text_field_populated_from_summary_content(self):
         """Combined evidence should have 'text' field set from summary content for generator."""
@@ -402,9 +402,10 @@ class TestRaptorInspiredRetrieval:
         assert summary_paper.level in (1, 2)
 
         # Config constants are fixed, not dynamically clustered
-        assert DEFAULT_K_SUMMARY == 5
-        assert DEFAULT_K_DETAIL_PER_SUMMARY == 3
-        assert MAX_DETAIL_CHUNKS_TOTAL == 10
+        cfg = get_config().raptor
+        assert cfg.k_summary == 5
+        assert cfg.k_detail_per_summary == 3
+        assert cfg.max_detail_chunks_total == 10
 
     def test_retrieve_signature_uses_defaults(self):
         """Retrieve method should use config constants as defaults."""
@@ -412,24 +413,21 @@ class TestRaptorInspiredRetrieval:
         sig = inspect.signature(self.retriever.retrieve)
         params = sig.parameters
 
-        assert params["k_summary"].default == DEFAULT_K_SUMMARY
-        assert params["k_detail"].default == MAX_DETAIL_CHUNKS_TOTAL
+        cfg = get_config().raptor
+        assert params["k_summary"].default is None  # Now uses config internally
+        assert params["k_detail"].default is None  # Now uses config internally
 
     def test_constants_exposed_for_configuration(self):
-        """Config constants should be importable for external configuration."""
-        from src.retrieval.raptor_retriever import (
-            DEFAULT_K_SUMMARY,
-            DEFAULT_K_DETAIL_PER_SUMMARY,
-            MAX_DETAIL_CHUNKS_TOTAL,
-        )
+        """Config constants should be accessible via config."""
+        cfg = get_config().raptor
 
         # These should be positive integers
-        assert isinstance(DEFAULT_K_SUMMARY, int) and DEFAULT_K_SUMMARY > 0
-        assert isinstance(DEFAULT_K_DETAIL_PER_SUMMARY, int) and DEFAULT_K_DETAIL_PER_SUMMARY > 0
-        assert isinstance(MAX_DETAIL_CHUNKS_TOTAL, int) and MAX_DETAIL_CHUNKS_TOTAL > 0
+        assert isinstance(cfg.k_summary, int) and cfg.k_summary > 0
+        assert isinstance(cfg.k_detail_per_summary, int) and cfg.k_detail_per_summary > 0
+        assert isinstance(cfg.max_detail_chunks_total, int) and cfg.max_detail_chunks_total > 0
 
         # Total should be at least per-summary * some summaries
-        assert MAX_DETAIL_CHUNKS_TOTAL >= DEFAULT_K_DETAIL_PER_SUMMARY
+        assert cfg.max_detail_chunks_total >= cfg.k_detail_per_summary
 
 
 if __name__ == "__main__":

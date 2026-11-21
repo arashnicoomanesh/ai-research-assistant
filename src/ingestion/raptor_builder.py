@@ -162,7 +162,7 @@ Summary:"""
                 prompt=prompt,
                 system_prompt="You are a research assistant creating concise paper summaries.",
                 temperature=0.0,
-                max_tokens=256,
+                max_tokens=get_config().raptor.builder_max_tokens,
             )
             summary = response.strip()
             # Ensure it's not too long

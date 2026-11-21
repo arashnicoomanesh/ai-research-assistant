@@ -12,7 +12,7 @@ from typing import List, Optional, Dict, Any
 from dataclasses import dataclass, asdict
 import numpy as np
 from src.core.embeddings import OllamaEmbeddings, get_embeddings
-from src.core.config import config
+from src.core.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +56,9 @@ class SemanticCache:
     def __init__(
         self,
         embeddings: Optional[OllamaEmbeddings] = None,
-        similarity_threshold: float = 0.92,
-        max_entries: int = 1000,
+        similarity_threshold: Optional[float] = None,
+        duplicate_threshold: Optional[float] = None,
+        max_entries: Optional[int] = None,
         cache_path: Optional[str] = None,
         ttl_seconds: int = 0,
         llm_model: str = "",
@@ -69,19 +70,22 @@ class SemanticCache:
         Args:
             embeddings: Embeddings client (creates default if None)
             similarity_threshold: Minimum cosine similarity for cache hit (0.0-1.0)
+            duplicate_threshold: Very high similarity threshold to treat as duplicate query (0.0-1.0)
             max_entries: Maximum number of entries to keep
             cache_path: Path to cache file (None = in-memory only)
             ttl_seconds: Time-to-live in seconds (0 or negative = no TTL)
             llm_model: LLM model name for cache identity
             embedding_model: Embedding model name for cache identity
         """
+        cfg = get_config().cache
         self.embeddings = embeddings or get_embeddings()
-        self.similarity_threshold = similarity_threshold
-        self.max_entries = max_entries
+        self.similarity_threshold = similarity_threshold if similarity_threshold is not None else cfg.similarity_threshold
+        self.duplicate_threshold = duplicate_threshold if duplicate_threshold is not None else cfg.duplicate_threshold
+        self.max_entries = max_entries if max_entries is not None else cfg.max_entries
         self.cache_path = Path(cache_path) if cache_path else None
         self.ttl_seconds = ttl_seconds
-        self.llm_model = llm_model or config.ollama.llm_model
-        self.embedding_model = embedding_model or config.ollama.embedding_model
+        self.llm_model = llm_model or get_config().ollama.llm_model
+        self.embedding_model = embedding_model or get_config().ollama.embedding_model
         self.entries: List[CacheEntry] = []
 
         # Load existing cache if path provided
@@ -300,7 +304,7 @@ class SemanticCache:
         # Check if similar entry already exists (update instead of duplicate)
         for existing in self.entries:
             similarity = self._cosine_similarity(query_embedding, existing.query_embedding)
-            if similarity >= 0.98:  # Very high similarity = likely same query
+            if similarity >= self.duplicate_threshold:  # Very high similarity = likely same query
                 existing.answer = answer
                 existing.sources = sources
                 existing.strategy = strategy
@@ -365,18 +369,21 @@ class SemanticCache:
 
 def get_cache(
     embeddings: Optional[OllamaEmbeddings] = None,
-    similarity_threshold: float = 0.92,
-    max_entries: int = 1000,
+    similarity_threshold: Optional[float] = None,
+    duplicate_threshold: Optional[float] = None,
+    max_entries: Optional[int] = None,
     cache_path: Optional[str] = None,
     ttl_seconds: int = 0,
     llm_model: str = "",
     embedding_model: str = "",
 ) -> SemanticCache:
     """Get a cache instance."""
+    cfg = get_config().cache
     return SemanticCache(
         embeddings=embeddings,
-        similarity_threshold=similarity_threshold,
-        max_entries=max_entries,
+        similarity_threshold=similarity_threshold if similarity_threshold is not None else cfg.similarity_threshold,
+        duplicate_threshold=duplicate_threshold if duplicate_threshold is not None else cfg.duplicate_threshold,
+        max_entries=max_entries if max_entries is not None else cfg.max_entries,
         cache_path=cache_path,
         ttl_seconds=ttl_seconds,
         llm_model=llm_model,

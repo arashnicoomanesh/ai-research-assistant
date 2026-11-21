@@ -12,7 +12,7 @@ from typing import List, Optional
 import requests
 import numpy as np
 from requests.exceptions import RequestException, Timeout
-from src.core.config import config
+from src.core.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,11 @@ class OllamaEmbeddings:
     # Uses OrderedDict for FIFO eviction when max size reached
     _query_cache: "OrderedDict[tuple[str, str], List[float]]" = OrderedDict()
     _cache_lock = threading.Lock()
-    _max_cache_size = 256
+
+    @classmethod
+    def _get_max_cache_size(cls) -> int:
+        """Get max cache size from config."""
+        return get_config().embedding.query_cache_max_size
 
     def __init__(
         self,
@@ -47,9 +51,9 @@ class OllamaEmbeddings:
             batch_size: Batch size for embed_batch (default from config)
             max_retries: Maximum retry attempts on failure (default from config)
         """
-        embedding_config = config.embedding
-        self.host = host or config.ollama.host
-        self.model = model or config.ollama.embedding_model
+        embedding_config = get_config().embedding
+        self.host = host or get_config().ollama.host
+        self.model = model or get_config().ollama.embedding_model
         self.timeout = timeout or embedding_config.timeout_seconds
         self.batch_size = batch_size or embedding_config.batch_size
         self.max_retries = max_retries if max_retries is not None else embedding_config.max_retries
@@ -102,11 +106,12 @@ class OllamaEmbeddings:
     def _cache_embedding(cls, model: str, query: str, embedding: List[float]) -> None:
         """Store embedding in cache with FIFO eviction."""
         key = cls._get_cache_key(model, query)
+        max_cache_size = cls._get_max_cache_size()
         with cls._cache_lock:
             if key in cls._query_cache:
                 # Update existing
                 cls._query_cache.pop(key)
-            elif len(cls._query_cache) >= cls._max_cache_size:
+            elif len(cls._query_cache) >= max_cache_size:
                 # FIFO eviction
                 cls._query_cache.popitem(last=False)
             cls._query_cache[key] = embedding

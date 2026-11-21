@@ -20,24 +20,11 @@ from src.retrieval.reranker import get_reranker, Reranker
 logger = logging.getLogger(__name__)
 
 
-# RRF constant
-RRF_K = 60
-
-
-@dataclass
-class RetrievalResult:
-    """Container for retrieval results."""
-    chunks: List[Dict[str, Any]]
-    query: str
-    strategy: str = "dense"
-    total_found: int = 0
-
-
 def _rrf_fuse(
     dense_results: List[Dict[str, Any]],
     bm25_results: List[Dict[str, Any]],
     top_k_final: int,
-    rrf_k: int = RRF_K,
+    rrf_k: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """
     Fuse dense and BM25 results using Reciprocal Rank Fusion (RRF).
@@ -46,11 +33,14 @@ def _rrf_fuse(
         dense_results: Dense results with 'score' and 'chunk_id'
         bm25_results: BM25 results with 'score' and 'chunk_id'
         top_k_final: Final number of results to return
-        rrf_k: RRF constant (default 60)
+        rrf_k: RRF constant (default from config)
 
     Returns:
         Fused and ranked results with 'rrf_score' field
     """
+    if rrf_k is None:
+        rrf_k = get_config().retrieval.rrf_k
+
     # Compute RRF scores
     rrf_scores: Dict[str, float] = {}
     chunk_map: Dict[str, Dict[str, Any]] = {}
@@ -87,6 +77,15 @@ def _rrf_fuse(
         final.append(result)
 
     return final
+
+
+@dataclass
+class RetrievalResult:
+    """Container for retrieval results."""
+    chunks: List[Dict[str, Any]]
+    query: str
+    strategy: str = "dense"
+    total_found: int = 0
 
 
 class HybridRetriever:

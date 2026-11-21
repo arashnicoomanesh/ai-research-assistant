@@ -20,6 +20,7 @@ import logging
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from src.core.llm import OllamaLLM, get_llm
+from src.core.config import get_config
 from src.retrieval.corrective_retriever import CorrectiveRetriever, CorrectiveRetrievalResult, get_corrective_retriever
 from src.retrieval.query_rewriter import get_rewriter
 
@@ -60,14 +61,11 @@ class MultiStepRetriever:
     5. Return deduplicated evidence + full process metadata
     """
 
-    MAX_SUB_QUESTIONS = 3
-    MAX_FOLLOW_UP = 1
-
     def __init__(
         self,
         corrective_retriever: Optional[CorrectiveRetriever] = None,
-        max_sub_questions: int = MAX_SUB_QUESTIONS,
-        max_follow_up: int = MAX_FOLLOW_UP,
+        max_sub_questions: Optional[int] = None,
+        max_follow_up: Optional[int] = None,
         relevance_threshold: float = 0.5,
     ):
         """
@@ -75,13 +73,14 @@ class MultiStepRetriever:
 
         Args:
             corrective_retriever: CorrectiveRetriever instance (creates default if None)
-            max_sub_questions: Maximum number of primary sub-questions
-            max_follow_up: Maximum follow-up rounds
+            max_sub_questions: Maximum number of primary sub-questions (default from config)
+            max_follow_up: Maximum follow-up rounds (default from config)
             relevance_threshold: Minimum relevance for chunk inclusion
         """
+        cfg = get_config().multi_step
         self.corrective_retriever = corrective_retriever or get_corrective_retriever()
-        self.max_sub_questions = max_sub_questions
-        self.max_follow_up = max_follow_up
+        self.max_sub_questions = max_sub_questions if max_sub_questions is not None else cfg.max_sub_questions
+        self.max_follow_up = max_follow_up if max_follow_up is not None else cfg.max_follow_up
         self.relevance_threshold = relevance_threshold
         self.rewriter = get_rewriter()
 
@@ -364,14 +363,15 @@ Return ONLY the JSON structure specified."""
 
 def get_multi_step_retriever(
     corrective_retriever: Optional[CorrectiveRetriever] = None,
-    max_sub_questions: int = 3,
-    max_follow_up: int = 1,
+    max_sub_questions: Optional[int] = None,
+    max_follow_up: Optional[int] = None,
     relevance_threshold: float = 0.5,
 ) -> MultiStepRetriever:
     """Get a multi-step retriever instance."""
+    cfg = get_config().multi_step
     return MultiStepRetriever(
         corrective_retriever,
-        max_sub_questions,
-        max_follow_up,
+        max_sub_questions if max_sub_questions is not None else cfg.max_sub_questions,
+        max_follow_up if max_follow_up is not None else cfg.max_follow_up,
         relevance_threshold,
     )

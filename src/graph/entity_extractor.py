@@ -319,7 +319,8 @@ Constraints:
         """Stage A: Full extraction with entities + relations."""
         try:
             # Truncate text to avoid token limits
-            text_truncated = text[:900] if len(text) > 900 else text
+            max_chars = get_config().graph.entity_extract_max_chars
+            text_truncated = text[:max_chars] if len(text) > max_chars else text
 
             prompt = f"""Extract entities and relations from this research paper abstract.
 
@@ -353,9 +354,10 @@ Return JSON only:"""
             return None, None
 
     def _stage_b(self, text: str, paper_id: str, chunk_id: str) -> Tuple[Optional[List[Entity]], None]:
-        """Stage B: Shorter text (600 chars), entities only."""
+        """Stage B: Shorter text (fallback chars), entities only."""
         try:
-            text_truncated = text[:600] if len(text) > 600 else text
+            max_chars = get_config().graph.entity_extract_fallback_chars
+            text_truncated = text[:max_chars] if len(text) > max_chars else text
 
             prompt = f"""Extract entities from this research paper abstract.
 

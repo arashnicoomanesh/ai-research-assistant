@@ -14,7 +14,7 @@ Constraints:
 import logging
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
-from src.core.config import config
+from src.core.config import get_config
 from src.core.embeddings import OllamaEmbeddings, get_embeddings
 from src.retrieval.hybrid_retriever import get_retriever, RetrievalResult
 from src.ingestion.raptor_builder import get_raptor_builder
@@ -23,11 +23,6 @@ from qdrant_client.models import Filter, FieldCondition, MatchValue
 from src.retrieval.qdrant_search import qdrant_search
 
 logger = logging.getLogger(__name__)
-
-# RAPTOR-inspired config constants (not full RAPTOR tree)
-DEFAULT_K_SUMMARY = 5
-DEFAULT_K_DETAIL_PER_SUMMARY = 3
-MAX_DETAIL_CHUNKS_TOTAL = 10
 
 
 @dataclass
@@ -102,8 +97,8 @@ class RaptorRetriever:
         self,
         query: str,
         paper_id: Optional[str] = None,
-        k_summary: int = DEFAULT_K_SUMMARY,
-        k_detail: int = MAX_DETAIL_CHUNKS_TOTAL,
+        k_summary: Optional[int] = None,
+        k_detail: Optional[int] = None,
     ) -> RaptorRetrievalResult:
         """
         Perform RAPTOR-enhanced retrieval.
@@ -117,6 +112,12 @@ class RaptorRetriever:
         Returns:
             RaptorRetrievalResult with mixed evidence
         """
+        cfg = get_config().raptor
+        if k_summary is None:
+            k_summary = cfg.k_summary
+        if k_detail is None:
+            k_detail = cfg.max_detail_chunks_total
+
         # Step 1: Determine query type
         is_survey = self._is_survey_query(query)
         query_type = "survey" if is_survey else "detail"
@@ -188,7 +189,7 @@ class RaptorRetriever:
         # Search summary nodes by vector similarity
         results = qdrant_search(
             client=self.retriever.client,
-            collection_name=config.qdrant.collection,
+            collection_name=get_config().qdrant.collection,
             query_vector=query_vector,
             query_filter=query_filter,
             limit=k,
@@ -248,7 +249,7 @@ class RaptorRetriever:
 
         results = qdrant_search(
             client=self.retriever.client,
-            collection_name=config.qdrant.collection,
+            collection_name=get_config().qdrant.collection,
             query_vector=query_vector,
             query_filter=Filter(must=must_conditions) if must_conditions else None,
             limit=k,
@@ -271,8 +272,8 @@ class RaptorRetriever:
         For survey queries: prioritize summaries, then add details linked to each summary.
         For detail queries: prioritize details, optionally include summaries.
 
-        Each selected summary gets at most DEFAULT_K_DETAIL_PER_SUMMARY detail chunks
-        from its source_chunk_ids, respecting a total budget of MAX_DETAIL_CHUNKS_TOTAL.
+        Each selected summary gets at most k_detail_per_summary detail chunks
+        from its source_chunk_ids, respecting a total budget of max_detail_chunks_total.
 
         Args:
             summary_nodes: RAPTOR summary nodes (already ranked by query similarity)
@@ -282,6 +283,10 @@ class RaptorRetriever:
         Returns:
             Deduplicated combined chunks with metadata
         """
+        cfg = get_config().raptor
+        k_detail_per_summary = cfg.k_detail_per_summary
+        max_detail_chunks_total = cfg.max_detail_chunks_total
+
         combined: List[Dict[str, Any]] = []
         seen_ids: set = set()
 
@@ -304,14 +309,14 @@ class RaptorRetriever:
                     })
 
                 # Attach detail chunks linked to this summary (via source_chunk_ids)
-                # Up to DEFAULT_K_DETAIL_PER_SUMMARY per summary, respecting total budget
-                if total_details_added < MAX_DETAIL_CHUNKS_TOTAL:
+                # Up to k_detail_per_summary per summary, respecting total budget
+                if total_details_added < max_detail_chunks_total:
                     source_ids = node.source_chunk_ids or []
                     added_for_this_summary = 0
                     for sid in source_ids:
-                        if total_details_added >= MAX_DETAIL_CHUNKS_TOTAL:
+                        if total_details_added >= max_detail_chunks_total:
                             break
-                        if added_for_this_summary >= DEFAULT_K_DETAIL_PER_SUMMARY:
+                        if added_for_this_summary >= k_detail_per_summary:
                             break
                         if sid in detail_by_id and sid not in seen_ids:
                             seen_ids.add(sid)
@@ -320,13 +325,13 @@ class RaptorRetriever:
                             added_for_this_summary += 1
 
             # Note: We do NOT add additional detail chunks beyond the per-summary budget
-            # to strictly respect MAX_DETAIL_CHUNKS_TOTAL and keep context bounded.
+            # to strictly respect max_detail_chunks_total and keep context bounded.
 
         else:
-            # Detail mode: start with details (up to MAX_DETAIL_CHUNKS_TOTAL), add summaries as overviews
+            # Detail mode: start with details (up to max_detail_chunks_total), add summaries as overviews
             details_added = 0
             for chunk in detail_chunks:
-                if details_added >= MAX_DETAIL_CHUNKS_TOTAL:
+                if details_added >= max_detail_chunks_total:
                     break
                 chunk_id = chunk.get("chunk_id", "")
                 if chunk_id not in seen_ids:
