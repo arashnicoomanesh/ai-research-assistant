@@ -1,6 +1,6 @@
 <div align="center">
 
-# AI Research Assistant
+# RAG Laboratory, AI Research Assistant
 
 A local-first, framework-free RAG laboratory that implements Adaptive routing, CRAG, multi-step retrieval, RAPTOR-inspired summaries, semantic cache, and Stage-A GraphRAG in one coherent CPU-runnable system.
 
