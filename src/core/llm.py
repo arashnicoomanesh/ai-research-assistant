@@ -6,6 +6,7 @@ Supports streaming and non-streaming responses with proper error handling.
 """
 import json
 import logging
+import threading
 from typing import Optional, Iterator, List, Dict, Any
 import requests
 from src.core.config import config
@@ -15,6 +16,9 @@ logger = logging.getLogger(__name__)
 
 class OllamaLLM:
     """Client for Ollama LLM API."""
+
+    _session: Optional[requests.Session] = None
+    _session_lock = threading.Lock()
 
     def __init__(
         self,
@@ -35,6 +39,25 @@ class OllamaLLM:
         self.timeout = timeout if timeout is not None else config.ollama.llm_timeout_seconds
         self._base_url = f"{self.host}/api"
         logger.info(f"OllamaLLM initialized: model={self.model}, timeout={self.timeout}s")
+
+    @classmethod
+    def _get_session(cls) -> requests.Session:
+        """Get or create the shared requests.Session (thread-safe)."""
+        if cls._session is None:
+            with cls._session_lock:
+                if cls._session is None:
+                    cls._session = requests.Session()
+                    logger.debug("Created shared requests.Session for OllamaLLM")
+        return cls._session
+
+    @classmethod
+    def close_session(cls) -> None:
+        """Close the shared session (for cleanup/testing)."""
+        with cls._session_lock:
+            if cls._session is not None:
+                cls._session.close()
+                cls._session = None
+                logger.debug("Closed shared requests.Session for OllamaLLM")
 
     def generate(
         self,
@@ -76,7 +99,7 @@ class OllamaLLM:
         if system_prompt:
             payload["system"] = system_prompt
 
-        response = requests.post(
+        response = self._get_session().post(
             f"{self._base_url}/generate",
             json=payload,
             timeout=self.timeout
@@ -119,7 +142,7 @@ class OllamaLLM:
         if system_prompt:
             payload["system"] = system_prompt
 
-        response = requests.post(
+        response = self._get_session().post(
             f"{self._base_url}/generate",
             json=payload,
             timeout=self.timeout,
@@ -171,7 +194,7 @@ class OllamaLLM:
             }
         }
 
-        response = requests.post(
+        response = self._get_session().post(
             f"{self._base_url}/chat",
             json=payload,
             timeout=self.timeout
@@ -209,7 +232,7 @@ class OllamaLLM:
             }
         }
 
-        response = requests.post(
+        response = self._get_session().post(
             f"{self._base_url}/chat",
             json=payload,
             timeout=self.timeout,
@@ -229,7 +252,7 @@ class OllamaLLM:
     def is_available(self) -> bool:
         """Check if Ollama server is reachable."""
         try:
-            response = requests.get(f"{self.host}/api/tags", timeout=5)
+            response = self._get_session().get(f"{self.host}/api/tags", timeout=5)
             return response.status_code == 200
         except requests.RequestException:
             return False
@@ -237,7 +260,7 @@ class OllamaLLM:
     def list_models(self) -> List[str]:
         """List available models on Ollama server."""
         try:
-            response = requests.get(f"{self.host}/api/tags", timeout=10)
+            response = self._get_session().get(f"{self.host}/api/tags", timeout=10)
             response.raise_for_status()
             return [m["name"] for m in response.json().get("models", [])]
         except requests.RequestException:

@@ -5,7 +5,9 @@ Provides embedding generation for text chunks using local embedding models.
 Supports batch processing with retry logic for CPU-safe operation.
 """
 import logging
+import threading
 import time
+from collections import OrderedDict
 from typing import List, Optional
 import requests
 import numpy as np
@@ -17,6 +19,15 @@ logger = logging.getLogger(__name__)
 
 class OllamaEmbeddings:
     """Client for Ollama embeddings API with retry logic."""
+
+    _session: Optional[requests.Session] = None
+    _session_lock = threading.Lock()
+
+    # Query embedding cache: key = (model, normalized_query), value = embedding vector
+    # Uses OrderedDict for FIFO eviction when max size reached
+    _query_cache: "OrderedDict[tuple[str, str], List[float]]" = OrderedDict()
+    _cache_lock = threading.Lock()
+    _max_cache_size = 256
 
     def __init__(
         self,
@@ -44,6 +55,68 @@ class OllamaEmbeddings:
         self.max_retries = max_retries if max_retries is not None else embedding_config.max_retries
         self._base_url = f"{self.host}/api"
         self._embedding_dim: Optional[int] = None
+
+    @classmethod
+    def _get_session(cls) -> requests.Session:
+        """Get or create the shared requests.Session (thread-safe)."""
+        if cls._session is None:
+            with cls._session_lock:
+                if cls._session is None:
+                    cls._session = requests.Session()
+                    logger.debug("Created shared requests.Session for OllamaEmbeddings")
+        return cls._session
+
+    @classmethod
+    def close_session(cls) -> None:
+        """Close the shared session (for cleanup/testing)."""
+        with cls._session_lock:
+            if cls._session is not None:
+                cls._session.close()
+                cls._session = None
+                logger.debug("Closed shared requests.Session for OllamaEmbeddings")
+
+    @classmethod
+    def _normalize_query(cls, query: str) -> str:
+        """Normalize query for cache key."""
+        return query.strip().lower()
+
+    @classmethod
+    def _get_cache_key(cls, model: str, query: str) -> tuple[str, str]:
+        """Generate cache key from model and normalized query."""
+        return (model, cls._normalize_query(query))
+
+    @classmethod
+    def _get_cached_embedding(cls, model: str, query: str) -> Optional[List[float]]:
+        """Get embedding from cache if present."""
+        key = cls._get_cache_key(model, query)
+        with cls._cache_lock:
+            if key in cls._query_cache:
+                # Move to end (most recently used)
+                embedding = cls._query_cache.pop(key)
+                cls._query_cache[key] = embedding
+                logger.debug(f"Query embedding cache hit for model={model}")
+                return embedding
+        return None
+
+    @classmethod
+    def _cache_embedding(cls, model: str, query: str, embedding: List[float]) -> None:
+        """Store embedding in cache with FIFO eviction."""
+        key = cls._get_cache_key(model, query)
+        with cls._cache_lock:
+            if key in cls._query_cache:
+                # Update existing
+                cls._query_cache.pop(key)
+            elif len(cls._query_cache) >= cls._max_cache_size:
+                # FIFO eviction
+                cls._query_cache.popitem(last=False)
+            cls._query_cache[key] = embedding
+
+    @classmethod
+    def clear_query_cache(cls) -> None:
+        """Clear the query embedding cache (for testing)."""
+        with cls._cache_lock:
+            cls._query_cache.clear()
+            logger.debug("Cleared query embedding cache")
 
     def embed_one(self, text: str) -> List[float]:
         """
@@ -109,6 +182,13 @@ class OllamaEmbeddings:
         Returns:
             List of embedding vectors
         """
+        # For single-text queries, check cache first
+        if len(texts) == 1:
+            cached = self._get_cached_embedding(self.model, texts[0])
+            if cached is not None:
+                logger.debug(f"Batch {batch_num}: cache hit for single query")
+                return [cached]
+
         last_exception = None
         
         for attempt in range(1, self.max_retries + 1):
@@ -119,7 +199,7 @@ class OllamaEmbeddings:
                 }
 
                 logger.debug(f"Batch {batch_num}, attempt {attempt}/{self.max_retries}: calling Ollama embed API")
-                response = requests.post(
+                response = self._get_session().post(
                     f"{self._base_url}/embed",
                     json=payload,
                     timeout=self.timeout
@@ -134,6 +214,10 @@ class OllamaEmbeddings:
                 # Cache embedding dimension on first successful call
                 if self._embedding_dim is None and embeddings:
                     self._embedding_dim = len(embeddings[0])
+
+                # Cache single-query results
+                if len(texts) == 1:
+                    self._cache_embedding(self.model, texts[0], embeddings[0])
 
                 logger.info(f"Batch {batch_num} completed: {len(embeddings)} embeddings generated")
                 return embeddings
@@ -163,6 +247,7 @@ class OllamaEmbeddings:
     def embed_query(self, query: str) -> List[float]:
         """
         Generate embedding for a search query.
+        Uses in-process cache for repeated identical queries.
 
         Args:
             query: Search query text
@@ -170,7 +255,15 @@ class OllamaEmbeddings:
         Returns:
             Query embedding vector
         """
-        return self.embed(query)
+        # Check cache first
+        cached = self._get_cached_embedding(self.model, query)
+        if cached is not None:
+            return cached
+        
+        # Not in cache, embed and cache
+        embedding = self.embed(query)
+        self._cache_embedding(self.model, query, embedding)
+        return embedding
 
     def embed_documents(self, documents: List[str]) -> List[List[float]]:
         """
@@ -195,7 +288,7 @@ class OllamaEmbeddings:
     def is_available(self) -> bool:
         """Check if Ollama server and embedding model are available."""
         try:
-            response = requests.get(f"{self.host}/api/tags", timeout=5)
+            response = self._get_session().get(f"{self.host}/api/tags", timeout=5)
             if response.status_code != 200:
                 return False
             models = [m["name"] for m in response.json().get("models", [])]

@@ -476,6 +476,13 @@ ai-research-assistant/
 
 ---
 
+## 🔒 Security Notes
+
+- **Grounded answers only:** The answer generator system prompt explicitly instructs the model to use *only* the provided context and to ignore any instructions embedded in retrieved text that attempt to override system rules. This mitigates prompt-injection via retrieved content.
+- **No external network calls at query time:** All inference runs locally via Ollama; no data leaves your machine during query processing.
+
+---
+
 ## Roadmap
 
 - **R2** GraphRAG linker/router hardening; strategy override CLI flag
