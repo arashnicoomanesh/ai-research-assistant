@@ -67,56 +67,59 @@ A local-first, framework-free RAG laboratory that implements Adaptive routing, C
 
 ---
 
-## How it works
+## Default runtime path (Reliable Mode)
+
+*Simplified default path; the full system architecture is shown in the [Architecture diagram](#architecture) below.*
 
 ```
-┌─────────────┐
-│  User Query │
-└──────┬──────┘
-       ▼
-┌─────────────────┐     ┌──────────────────┐
-│  Query Rewrite  │────▶│  Adaptive Router │
-│  (entity-aware) │     │  (heuristics+LLM)│
-└─────────────────┘     └────────┬─────────┘
-                                 │
-       ┌─────────────────────────┼─────────────────────────┐
-       ▼                         ▼                         ▼
-┌─────────────┐           ┌─────────────┐           ┌─────────────┐
-│ no_retrieval│           │  baseline   │           │ single_shot │
-│ (model-only)│           │  (dense)    │           │  (CRAG)     │
-└─────────────┘           └─────────────┘           └──────┬──────┘
-                                                           │
-                              ┌────────────────────────────┘
-                              ▼
-                    ┌─────────────────────┐
-                    │  Hybrid Retrieval   │
-                    │  dense + BM25 + RRF │
-                    │  parent expansion   │
-                    └──────────┬──────────┘
-                               ▼
-                    ┌─────────────────────┐
-                    │  Sludge Filter      │
-                    │  (table/OCR noise)  │
-                    └──────────┬──────────┘
-                               ▼
-                    ┌─────────────────────┐
-                    │  Context Cap        │
-                    │  (token budget +    │
-                    │   parent score      │
-                    │   inheritance)      │
-                    └──────────┬──────────┘
-                               ▼
-                    ┌─────────────────────┐
-                    │  Answer Generation  │
-                    │  (grounded + cites) │
-                    │  self-check (opt)   │
-                    └─────────────────────┘
+User query
+    ▼
+┌──────────────────┐
+│  Semantic Cache  │───HIT──▶ Return cached_* answer instantly
+└────────┬─────────┘
+         │ MISS
+         ▼
+┌──────────────────┐
+│  Query Rewrite   │  (entity-aware normalization)
+└────────┬─────────┘
+         ▼
+┌──────────────────┐
+│  Adaptive Router │
+└────────┬─────────┘
+         │
+         ▼ (RELIABLE_MODE=true, EXPERIMENTAL_ROUTING=false)
+┌──────────────────────────────┐
+│  Policy: single_shot (CRAG)  │  ◀─── FORCE_STRATEGY=baseline for no-CRAG path
+└────────────┬─────────────────┘
+             │
+             ▼
+┌─────────────────────────────────────────────┐
+│  Retrieve (single_shot / CRAG)              │
+│  • Hybrid retrieval: dense + BM25 + RRF     │
+│    (k=60; BM25 index must be built)         │
+│  • Parent expansion (score inheritance)     │
+│  • CRAG: optional corrective rewrite/merge  │
+└────────────┬────────────────────────────────┘
+             │
+             ▼
+┌─────────────────────────────┐
+│  Context Assembly           │
+│  • Sludge filter (table/OCR)│
+│  • Hard cap: CONTEXT_TOP_K  │
+└────────────┬────────────────┘
+             │
+             ▼
+┌─────────────────────────────────────┐
+│  Answer Generator                   │
+│  • Grounded-only prompt + citations │
+│  • Self-check (optional; OFF in     │
+│    CPU-Safe Mode)                   │
+└─────────────────────────────────────┘
 ```
 
-**Experimental paths** (require `EXPERIMENTAL_ROUTING=true`):
-- `multi_step` — decompose → sub-questions → per-sub retrieval → synthesize
-- `crag_raptor` — RAPTOR-inspired summary retrieval + bounded detail attach
-- `graph_rag` — entity linking → 1-hop traversal → supporting chunk fusion
+> **Note on baseline:** `baseline` = hybrid retrieve (dense + BM25 + RRF), **NO CRAG loop**. Activated via `FORCE_STRATEGY=baseline`.
+
+> **Experimental paths** (`multi_step`, `crag_raptor`, `graph_rag`) require `EXPERIMENTAL_ROUTING=true` — see the full Architecture diagram for the complete retrieval fabric.
 
 ---
 
