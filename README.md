@@ -153,7 +153,56 @@ The adaptive router selects a strategy per query. Each answer header shows the s
 
 ---
 
-## Quick Start
+## Quick Start (Docker)
+
+> **Recommended for new users.** Runs Qdrant, Ollama, and the app in containers. No local Python/Ollama install needed (Docker only).
+
+```bash
+# 1. Clone the repo
+git clone https://github.com/arashnicoomanesh/ai-research-assistant.git
+cd ai-research-assistant
+
+# 2. Configure environment for Docker
+cp .env.docker.example .env
+# Edit .env if needed (defaults work for most cases)
+
+# 3. Start all services (Qdrant + Ollama + model pull + app)
+docker compose up -d
+# First run pulls models (qwen2.5-coder:3b, nomic-embed-text:v1.5) — may take several minutes
+
+# 4. Wait for services to be healthy
+make health
+# or: docker compose run --rm app python -m src.healthcheck
+
+# 5. Place PDFs in data/papers/
+#    mkdir -p data/papers && cp /path/to/papers/*.pdf data/papers/
+
+# 6. Ingest papers + build BM25 index
+make ingest
+make rebuild-bm25
+
+# 7. (Optional) Build RAPTOR summaries
+make build-raptor
+# or: docker compose run --rm app python scripts/build_raptor.py --all
+
+# 8. (Optional) Build GraphRAG graph
+make build-graph
+# or: docker compose run --rm app python scripts/build_graph.py --limit 8
+
+# 9. Ask a question
+docker compose run --rm app python src/main.py "What is the attention mechanism in transformers?"
+
+# 10. Run evaluation
+make eval
+```
+
+**Prerequisites:** [Docker](https://docker.com) + [Docker Compose](https://docs.docker.com/compose/) (v2+).
+**Cold start:** First `docker compose up` pulls Ollama models (~2-4 GB); can take 5-15 minutes depending on connection.
+**Data persistence:** Volumes `qdrant_storage` and `ollama_models` persist across restarts. `./data/` is bind-mounted.
+
+---
+
+## Quick Start (Bare Metal)
 
 > **⚡ CPU Note:** CPU-Safe Mode is ON by default. First answers take 1–4 min; repeats are instant via cache. Ollama + Qdrant must be running before you query.
 

@@ -17,7 +17,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.11"
 
       - name: Install dependencies
         run: |
@@ -49,3 +49,19 @@ jobs:
       - name: Unit tests
         run: |
           PYTHONPATH=. python -m pytest -q
+
+  docker-config:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate docker compose config
+        run: |
+          docker compose config --quiet
+          echo "docker compose config OK"
+
+      - name: Build app image (optional, skip if slow)
+        run: |
+          docker compose build app
+        timeout-minutes: 10

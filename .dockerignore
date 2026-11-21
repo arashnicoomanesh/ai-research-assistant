@@ -1,0 +1,54 @@
+# Git
+.git
+.gitignore
+
+# Python
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.mypy_cache
+.ruff_cache
+*.egg-info
+dist
+build
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Data (large, runtime-generated)
+data/processed/
+data/cache/
+data/graph/
+qdrant_storage/
+
+# Environment
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Testing
+.coverage
+htmlcov/
+.tox/
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Docs (optional, keep if needed for image)
+# docs/

@@ -1,0 +1,15 @@
+# Core dependencies (slim - for Docker)
+qdrant-client==1.10.0          # Vector database client
+ollama==0.4.2                  # Ollama Python client for LLM/embeddings
+pypdf==4.3.1                   # PDF parsing (fallback)
+python-dotenv==1.0.1           # Environment variable loading
+numpy==1.26.4                  # Numerical computing
+tqdm==4.66.4                   # Progress bars
+rank-bm25==0.2.2               # BM25 keyword search
+xxhash==3.4.1                  # Fast hashing for cache/lookup
+pdfplumber==0.11.4             # PDF parser for structure extraction
+requests==2.32.3               # HTTP requests for healthcheck
+
+# Note: docling is intentionally excluded from default Docker image
+# to keep image size small. Install with: pip install docling==2.15.1
+# if structure-aware PDF parsing is needed.

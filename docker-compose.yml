@@ -1,0 +1,121 @@
+version: "3.8"
+
+# AI Research Assistant - Docker Compose Stack
+# Services: Qdrant (vector DB), Ollama (LLM/embeddings), App (Python application)
+# Usage: docker compose up -d && docker compose run app python scripts/ingest_papers.py
+
+services:
+  # ============================================================
+  # Qdrant Vector Database
+  # ============================================================
+  qdrant:
+    image: qdrant/qdrant:v1.10.0
+    container_name: ai-rag-qdrant
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/collections"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+
+  # ============================================================
+  # Ollama LLM/Embedding Server
+  # ============================================================
+  ollama:
+    image: ollama/ollama:0.4.0
+    container_name: ai-rag-ollama
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          memory: 2G
+
+  # ============================================================
+  # Ollama Model Initialization (one-shot)
+  # Pulls models defined in .env.docker.example
+  # ============================================================
+  ollama-init:
+    image: ollama/ollama:0.4.0
+    container_name: ai-rag-ollama-init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    command: |
+      echo "Waiting for Ollama to be ready..." &&
+      ollama pull qwen2.5-coder:3b &&
+      ollama pull nomic-embed-text:v1.5 &&
+      echo "Models pulled successfully"
+    restart: "no"
+
+  # ============================================================
+  # Application (Python)
+  # ============================================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: ai-rag-app
+    environment:
+      # Container hostnames (Docker Compose service names)
+      - QDRANT_URL=http://qdrant:6333
+      - OLLAMA_HOST=http://ollama:11434
+      # Python runtime
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+    env_file:
+      - .env
+    volumes:
+      # Mount data directories for persistence
+      - ./data:/app/data
+      # Optional: mount source for development (comment out for production)
+      # - ./src:/app/src
+      # - ./scripts:/app/scripts
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+      ollama-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 1G
+    # Default command shows help; use `docker compose run app ...` for commands
+    command: ["--help"]
+
+volumes:
+  qdrant_storage:
+  ollama_models:
