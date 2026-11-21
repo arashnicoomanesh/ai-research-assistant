@@ -398,9 +398,68 @@ Reports written to `data/eval/reports/`. See [Evaluation & ablations](#evaluatio
 
 ![Architecture](docs/architecture.webp)
 
----
+*Local-first multi-strategy RAG: indexing → cache → understand/route → retrieval fabric → context assembly → grounded answer. Note: diagram is system architecture for the lab; some boxes are simplified.*
 
-## GraphRAG Stage A
+### How to read the diagram
+
+- **Left — Data & Indexing:** PDFs → structure-aware parsing → parent/child chunks → Qdrant dense vectors; RAPTOR summary nodes (query-similar, limited hierarchy); Stage-A Graph store (NetworkX + JSON, entity/relation provenance).
+- **Center top — User query → Semantic cache:** HIT returns cached answer instantly; MISS continues through the pipeline. Cache is similarity-based, optional TTL, auto-invalidates on ingest/model change; key does **not** include strategy (clear cache for ablations).
+- **Query understanding:** Entity-aware rewrite → Adaptive router (heuristics + optional LLM classifier).
+- **Retrieval fabric:** Multiple strategy paths selectable by router or override:
+  - `single_shot` (CRAG) — dense retrieve → optional corrective rewrite/merge
+  - `multi_step` — decompose → per-sub retrieval → synthesize (requires `EXPERIMENTAL_ROUTING=true`)
+  - `crag_raptor` — RAPTOR-inspired summary retrieval + bounded detail attach (requires `EXPERIMENTAL_ROUTING=true`)
+  - `graph_rag` — entity linking → 1-hop traversal → supporting chunk fusion (requires `EXPERIMENTAL_ROUTING=true`)
+  - `baseline` — dense retrieve only, no CRAG loop (via `FORCE_STRATEGY=baseline`)
+- **Context assembly:** Parent expansion (child→parent lookup; parent inherits max child score); Graph supporting chunks when applicable; Sludge filtering (table/OCR noise); Hard chunk cap (`CONTEXT_TOP_K`).
+- **Answer generator:** Grounded-only prompt with prompt-injection mitigation; citations; optional faithfulness self-check (OFF in CPU-Safe Mode); graceful fallback on Ollama timeout.
+- **Right — Runtime policies & observability:** CPU-Safe Mode (default ON), Ollama, optional grader/self-check, eval harness, strategy labels emitted per answer.
+
+### Implemented nuances (not all drawn explicitly)
+
+- **Hybrid retrieval** = dense + BM25 + RRF (k=60). BM25 index must be built after ingest: `python scripts/ingest_papers.py --rebuild-bm25`.
+- **baseline** via `FORCE_STRATEGY=baseline` — skips the CRAG corrective loop entirely.
+- **Policy overrides** (`RELIABLE_MODE`, `EXPERIMENTAL_ROUTING`, `FORCE_STRATEGY`) sit between router intent and execution.
+- **Context path** also applies sludge filtering and a hard chunk cap.
+- **RAPTOR path** is RAPTOR-inspired (limited 2-level hierarchy: section=1, paper=2), not full recursive clustering tree.
+- **Graph Stage B** (communities/global summaries) is not in diagram and not implemented.
+- **Cache** is similarity-based; does not key on strategy — clear cache for ablations: `python -c "from src.retrieval.semantic_cache import get_cache; get_cache().clear()"`.
+
+### Default runtime path (Reliable Mode)
+
+1. **Cache lookup** — if HIT, return instantly.
+2. **Query rewrite** — entity-aware normalization.
+3. **Route** — router picks `no_retrieval` / `baseline` / `single_shot` (CRAG).
+4. **Retrieve (CRAG)** — dense search (+ BM25 if hybrid) → optional corrective rewrite/merge → RRF fusion.
+5. **Context assemble** — parent expansion (score inheritance) → sludge filter → cap to `CONTEXT_TOP_K`.
+6. **Generate** — grounded prompt → citations → optional self-check → return.
+7. **Cache store** — embed query → save answer with strategy label.
+
+### Default Reliable path (sequence)
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant C as Semantic Cache
+    participant R as Query Rewriter
+    participant A as Adaptive Router
+    participant H as Hybrid Retriever
+    participant P as Context Assembly
+    participant G as Answer Generator
+    U->>C: query
+    alt Cache HIT
+        C-->>U: cached answer + strategy
+    else Cache MISS
+        C->>R: rewritten query
+        R->>A: route intent
+        A->>H: single_shot (CRAG)
+        H->>H: dense + BM25 + RRF
+        H->>P: parent expand + sludge filter + cap
+        P->>G: grounded context
+        G-->>U: answer + citations
+        G->>C: store (query, embedding, answer, strategy)
+    end
+```
 
 **Scope:** Local entity–relation graph extracted from paper chunks.
 
