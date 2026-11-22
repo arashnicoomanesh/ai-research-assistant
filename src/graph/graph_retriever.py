@@ -2,6 +2,9 @@
 Graph Retriever for GraphRAG.
 
 Performs local graph retrieval: entity linking + neighborhood traversal.
+
+Stage A Scope: Local entity graph only. No community detection, no global summaries,
+no map-reduce over communities. Entity linking is heuristic (exact/fuzzy/token overlap).
 """
 import logging
 import re
@@ -14,8 +17,12 @@ from qdrant_client.models import Filter, FieldCondition, MatchValue
 from src.graph.schema import Entity, Relation, GraphEvidence
 from src.graph.graph_store import get_graph_store, GraphStore, _normalize_entity_id
 from src.graph.entity_extractor import get_entity_extractor, EntityExtractor
+from src.graph.capabilities import describe, log_capabilities
 
 logger = logging.getLogger(__name__)
+
+# Track whether we've logged the Stage A warning for this session
+_GRAPHRAG_STAGE_WARNING_LOGGED = False
 
 # Canonical entity ID map for strong alias resolution
 _CANONICAL_ALIASES = {
@@ -85,6 +92,15 @@ class GraphRetriever:
         Returns:
             GraphEvidence with entities, relations, and supporting chunks
         """
+        global _GRAPHRAG_STAGE_WARNING_LOGGED
+        if not _GRAPHRAG_STAGE_WARNING_LOGGED:
+            logger.warning(
+                "GraphRAG Stage A experimental; no community detection / global summaries; "
+                "global theme queries may underperform. %s",
+                describe(),
+            )
+            _GRAPHRAG_STAGE_WARNING_LOGGED = True
+
         logger.info(f"Graph retrieval: query='{query}', paper_id={paper_id}, hops={self.hops}")
 
         # Step 1: Entity linking from query - link ALL named entities

@@ -134,7 +134,7 @@ The adaptive router selects a strategy per query. Each answer header shows the s
 | `single_shot` | CRAG path — single retrieval + optional corrective step. Default in Reliable Mode. | Standard fact-seeking |
 | `multi_step` | Decompose → sub-questions → per-sub retrieval → synthesize. Requires `EXPERIMENTAL_ROUTING=true`. | Complex multi-part |
 | `crag_raptor` | RAPTOR-inspired hierarchical retrieval via summary layers. Requires `EXPERIMENTAL_ROUTING=true`. | Survey / overview / deep-dive |
-| `graph_rag` | Entity linking → 1-hop traversal → grounded answer. Requires `EXPERIMENTAL_ROUTING=true`. | Technique list / relational |
+| `graph_rag` | **Stage A:** Entity linking → 1-hop traversal → grounded answer. Local graph only (no communities/global). Requires `EXPERIMENTAL_ROUTING=true`. | Technique list / relational |
 | `cached_*` | Served from semantic cache (instant). | Exact/similar repeat query |
 
 ---
@@ -525,6 +525,26 @@ sequenceDiagram
 - Retrieval links query entities, expands 1-hop neighborhood, fetches supporting Qdrant chunks
 
 **Stage B (planned):** Community detection + global summary generation (Microsoft-style GraphRAG)
+
+### GraphRAG Stage A — what it does not do
+
+The current implementation is **Stage A (local entity graph only)**. It explicitly does **not** include:
+
+| Capability | Status | Notes |
+|------------|--------|-------|
+| Community detection (Leiden/clustering) | 🚫 Not implemented | No community structure computed |
+| Community report/summary generation | 🚫 Not implemented | No hierarchical summaries over communities |
+| Global map-reduce query answering | 🚫 Not implemented | No global search over community reports |
+| Thematic/global queries | 🚫 Not implemented | Queries like "What are the main themes across all papers?" will underperform |
+| Microsoft-style GraphRAG global search | 🚫 Not implemented | This is a Stage B roadmap item |
+
+**What Stage A does:**
+- Entity extraction and linking from paper abstracts/chunks (heuristic: exact + fuzzy + token overlap)
+- Local entity-relation graph stored as NetworkX JSON (`data/graph/graph.json`)
+- 1-hop neighborhood traversal for query-time retrieval
+- Grounded answers with explicit entity/relation evidence and supporting vector chunks
+
+**Implication:** Relational queries like "How is Self-RAG related to CRAG?" or "What techniques does Self-RAG introduce?" work via local graph traversal. Global/theme queries like "What are the major trends in RAG across all papers?" are **not supported** and will fall back to vector retrieval or produce incomplete answers.
 
 **Practical commands:**
 ```bash

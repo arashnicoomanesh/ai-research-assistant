@@ -37,7 +37,7 @@ from src.retrieval.semantic_cache import get_cache
 from src.retrieval.corrective_retriever import get_corrective_retriever, CorrectiveRetrievalResult
 from src.retrieval.multi_step_retriever import get_multi_step_retriever, MultiStepRetriever
 from src.retrieval.raptor_retriever import get_raptor_retriever, RaptorRetrievalResult
-from src.graph import get_graph_retriever, GraphEvidence
+from src.graph import get_graph_retriever, GraphEvidence, log_capabilities
 from src.routing.adaptive_router import get_router, RoutingDecision
 from src.generation.answer_generator import get_generator, GeneratedAnswer
 
@@ -198,6 +198,10 @@ class ResearchAssistant:
         # Cache stats
         stats = self.cache.stats()
         logger.info("Cache: %d entries, %d total hits", stats["entries"], stats["total_hits"])
+
+        # Log GraphRAG capability manifest (once per session)
+        if config.graph.enabled:
+            log_capabilities()
 
     @staticmethod
     def _to_dict(chunk: Any) -> Dict[str, Any]:
